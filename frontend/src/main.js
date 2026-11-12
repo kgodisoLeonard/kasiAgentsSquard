@@ -12,7 +12,9 @@ import { renderRules } from './pages/rules.js';
 import { renderLogin } from './pages/login.js';
 import { renderSupplier } from './pages/supplier.js';
 
-const user = JSON.parse(localStorage.getItem('spaza_user') || 'null');
+let user = null;
+try { user = JSON.parse(localStorage.getItem('spaza_user') || 'null'); }
+catch { localStorage.removeItem('spaza_user'); }
 const ownerRoutes = {
   dashboard: { label: 'Dashboard', title: 'Good day, Thandi 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
   pos: { label: 'Point of Sale', title: 'Point of Sale', sub: 'Tap or scan products to ring up a sale.', render: renderPOS },
