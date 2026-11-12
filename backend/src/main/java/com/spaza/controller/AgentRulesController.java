@@ -2,7 +2,8 @@ package com.spaza.controller;
 import com.spaza.repository.AgentPolicy;
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
-@RestController @RequestMapping("/api/agent/rules")
+/** Human-owner administration endpoint. It is deliberately outside the agent API namespace. */
+@RestController @RequestMapping("/api/human/rules")
 public class AgentRulesController {
   private final AgentPolicy policy; public AgentRulesController(AgentPolicy policy){this.policy=policy;}
   @GetMapping public Map<String,Object> get(){return Map.of("success",true,"rules",policy.get(),"note","Only authorised human owners can change these guardrails.");}

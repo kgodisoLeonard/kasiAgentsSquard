@@ -11,6 +11,13 @@ public class AgentController {
     private final InMemoryStore store; private final AgentPolicy policy;
     public AgentController(InMemoryStore store, AgentPolicy policy){this.store=store;this.policy=policy;}
 
+    /** The agent's only configuration input: a read-only guardrail snapshot. Mandates are never exposed here. */
+    @GetMapping("/rules")
+    public Map<String,Object> rules() {
+        return Map.of("success", true, "rules", policy.get(),
+                "access", "READ_ONLY", "restrictedResources", List.of("mandates", "wallets", "bank_details", "identity_documents"));
+    }
+
     @GetMapping("/shortages")
     public Map<String, Object> shortages() {
         List<Map<String,Object>> groups=new ArrayList<>(); List<Map<String,Object>> signals=new ArrayList<>();
