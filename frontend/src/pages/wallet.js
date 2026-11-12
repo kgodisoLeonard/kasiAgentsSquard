@@ -1,63 +1,85 @@
-import { toast } from '../main.js';
+import { esc, money, num, toast } from '../ui.js';
 
-export async function renderWallet(root, api) {
-  const status = await api.xrplStatus();
+export async function renderWallet(root, api, alive) {
+  let status = await api.xrplStatus();
+  if (!alive()) return;
 
   root.innerHTML = `
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div class="card">
-        <h3 class="font-bold text-white mb-3">XRPL Testnet Wallet</h3>
-        <div class="space-y-3">
-          <div>
-            <div class="text-xs text-slate-400">RLUSD Balance</div>
-            <div class="text-2xl font-bold font-mono text-white">1,250.00 <span class="text-sm text-emerald-400">RLUSD</span></div>
+    <div class="grid g-3">
+      <div class="stack">
+        <div class="balance-card">
+          <div class="lbl">RLUSD balance</div>
+          <div class="amt mono" id="bal">${num(status.rlusdBalance)}</div>
+          <div class="lbl">${num(status.xrpBalance)} XRP · reserve</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:26px">
+            <span class="mono" style="font-size:12px;opacity:.8">${esc(status.rlusdIssuer.slice(0, 6))}••••${esc(status.rlusdIssuer.slice(-4))}</span>
+            <span class="chip" style="background:hsla(0 0% 100% / .1);border-color:hsla(0 0% 100% / .2)">● ${esc(status.network.toUpperCase())}</span>
           </div>
-          <div>
-            <div class="text-xs text-slate-400">XRP Balance</div>
-            <div class="text-lg font-bold font-mono text-slate-300">48.50 <span class="text-sm text-slate-400">XRP</span></div>
-          </div>
-          <div class="text-xs text-slate-500 pt-2 border-t border-slate-800">
-            Network: ${status.network}<br/>
-            RLUSD Issuer: <span class="font-mono text-slate-400">${status.rlusdIssuer.substring(0, 16)}...</span>
-          </div>
+        </div>
+        <div class="card">
+          <h3>Agent guard-rail</h3><p class="sub">Payments above this are blocked by your mandate</p>
+          <div class="mono" style="font-size:24px;font-weight:700">${money(status.perTxLimit)} <span style="font-size:13px;color:var(--muted)">per tx</span></div>
         </div>
       </div>
 
-      <div class="card md:col-span-2">
-        <h3 class="font-bold text-white mb-3">Send XRPL Testnet Payment</h3>
-        <div class="space-y-3">
-          <div>
-            <label class="text-xs text-slate-400">Destination Address</label>
-            <input id="dest" value="${status.rlusdIssuer}" class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-white"/>
+      <div class="card span-2">
+        <h3>Send RLUSD</h3><p class="sub">Submits a Payment transaction to the XRPL Testnet</p>
+        <form id="pay-form" class="stack">
+          <div class="field"><label for="dest">Destination address</label>
+            <input id="dest" class="input mono" style="font-size:13px" value="${esc(status.rlusdIssuer)}" required/></div>
+          <div class="field"><label for="amount">Amount (RLUSD)</label>
+            <input id="amount" class="input" type="number" min="0.01" step="0.01" value="250" required/></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${[50, 100, 250, 500, 1500].map((v) => `<button type="button" class="btn btn-ghost btn-sm" data-amt="${v}">${v}</button>`).join('')}
           </div>
-          <div>
-            <label class="text-xs text-slate-400">Amount (RLUSD)</label>
-            <input id="amount" type="number" value="250" class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-white"/>
-          </div>
-          <button id="pay" class="btn-primary w-full">Send XRPL Payment</button>
-          <div id="log" class="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs text-slate-300 space-y-1 max-h-40 overflow-y-auto">
-            <div>[SYSTEM] Connected to ${status.wsUrl}</div>
-            <div>[SYSTEM] Ready for submission...</div>
-          </div>
+          <button id="pay" type="submit" class="btn btn-primary btn-block" style="padding:14px">Send payment</button>
+        </form>
+        <div class="terminal" id="log" style="margin-top:18px">
+          <div class="info">[SYSTEM] Connected to ${esc(status.wsUrl)}</div>
+          <div>[SYSTEM] Ready for submission…</div>
         </div>
       </div>
     </div>
-  `;
 
-  root.querySelector('#pay').addEventListener('click', async () => {
-    const amount = parseFloat(root.querySelector('#amount').value);
-    const destination = root.querySelector('#dest').value.trim();
-    const log = root.querySelector('#log');
+    <div class="card" style="margin-top:20px">
+      <h3>Transaction history</h3><p class="sub">Payments sent this session</p>
+      <div id="txs"></div>
+    </div>`;
+
+  const $ = (s) => root.querySelector(s);
+  const log = (html, cls = '') => { const l = $('#log'); l.insertAdjacentHTML('beforeend', `<div class="${cls}">${html}</div>`); l.scrollTop = l.scrollHeight; };
+
+  function drawTxs() {
+    $('#bal').textContent = num(status.rlusdBalance);
+    $('#txs').innerHTML = status.transactions.length ? `
+      <table class="table"><thead><tr><th>Hash</th><th>Destination</th><th>Time</th><th style="text-align:right">Amount</th></tr></thead>
+      <tbody>${status.transactions.map((t) => `
+        <tr><td class="mono" style="font-size:12px"><a href="https://testnet.xrpl.org/transactions/${esc(t.hash)}" target="_blank" rel="noopener" style="color:var(--primary)">${esc(t.hash.slice(0, 14))}…</a></td>
+        <td class="mono" style="font-size:12px">${esc(t.destination.slice(0, 10))}…</td>
+        <td style="color:var(--muted);font-size:13px">${new Date(t.timestamp).toLocaleTimeString('en-ZA')}</td>
+        <td class="mono" style="text-align:right;color:var(--rose)">−${num(t.amount)}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty"><div class="big">🪙</div>No payments yet</div>`;
+  }
+  drawTxs();
+
+  root.querySelectorAll('[data-amt]').forEach((b) => b.addEventListener('click', () => { $('#amount').value = b.dataset.amt; }));
+
+  $('#pay-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const amount = parseFloat($('#amount').value);
+    const destination = $('#dest').value.trim();
+    const btn = $('#pay'); btn.disabled = true; btn.textContent = 'Submitting…';
+    log(`[SUBMIT] Payment ${num(amount)} RLUSD → ${esc(destination.slice(0, 12))}…`);
     try {
-      log.innerHTML += `<div>[SUBMIT] Sending ${amount} RLUSD...</div>`;
       const res = await api.pay({ amount, destination });
-      log.innerHTML += `<div class="text-emerald-400">[SUCCESS] tesSUCCESS</div>`;
-      log.innerHTML += `<div class="text-slate-400 text-[10px]">Hash: ${res.hash.substring(0, 32)}...</div>`;
-      log.scrollTop = log.scrollHeight;
-      toast('Payment sent: ' + res.hash.substring(0, 12) + '...');
+      log(`[RESULT] ${esc(res.engineResult)}`, 'ok');
+      log(`[HASH] ${esc(res.hash.slice(0, 40))}…`);
+      toast(`Sent ${num(amount)} RLUSD`);
+      status = await api.xrplStatus();
+      drawTxs();
     } catch (err) {
-      log.innerHTML += `<div class="text-rose-400">[BLOCKED] ${err.message}</div>`;
+      log(`[BLOCKED] ${esc(err.message)}`, 'err');
       toast(err.message, 'error');
-    }
+    } finally { btn.disabled = false; btn.textContent = 'Send payment'; }
   });
 }

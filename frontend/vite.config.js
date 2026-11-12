@@ -1,7 +1,11 @@
 import { defineConfig } from 'vite';
+
+// Backend port can be overridden: $env:API_PORT=8081; npm run dev
+const apiPort = process.env.API_PORT || 8080;
+
 export default defineConfig({
   server: {
     port: 5173,
-    proxy: { '/api': { target: 'http://localhost:8080', changeOrigin: true } }
-  }
+    proxy: { '/api': { target: `http://localhost:${apiPort}`, changeOrigin: true } },
+  },
 });

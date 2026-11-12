@@ -1,130 +1,176 @@
-import { toast } from '../main.js';
+import { esc, money, toast, icons, emojiFor } from '../ui.js';
 
-export async function renderPOS(root, api) {
+export async function renderPOS(root, api, alive) {
   const data = await api.inventory();
-  const inventory = data.inventory;
-  const cart = [];
-  let paymentMethod = 'cash';
+  if (!alive()) return;
+  let inventory = data.inventory;
+  const cart = new Map(); // id -> qty
+  let method = 'cash';
+  let filter = '';
 
   root.innerHTML = `
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div class="card lg:col-span-2">
-        <h2 class="text-xl font-bold mb-2">Phone-Scan Point of Sale</h2>
-        <p class="text-sm text-slate-400 mb-4">Scan or tap a product to add it to the cart.</p>
-        <input id="search" placeholder="Search product or barcode..." class="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl mb-4 text-white"/>
-        <div id="catalog" class="grid grid-cols-2 sm:grid-cols-3 gap-4"></div>
+    <div class="grid g-3">
+      <div class="card span-2">
+        <div class="card-head">
+          <div><h3>Products</h3><p class="sub">Tap a product or type a barcode and press Enter</p></div>
+          <button class="btn btn-ghost btn-sm" id="add-product">+ New product</button>
+        </div>
+        <div class="search">${icons.search}<input id="search" class="input" placeholder="Search name or scan barcode…" autocomplete="off"/></div>
+        <div id="catalog" class="products"></div>
       </div>
-      <div class="card">
-        <h3 class="font-bold text-lg mb-3 text-white">Current Sale</h3>
-        <div id="cart" class="space-y-2 mb-4 max-h-64 overflow-y-auto"></div>
-        <div class="border-t border-slate-800 pt-3 text-sm space-y-1">
-          <div class="flex justify-between"><span class="text-slate-400">Subtotal</span><span id="subtotal" class="font-mono text-white">R0.00</span></div>
-          <div class="flex justify-between"><span class="text-slate-400">Profit</span><span id="profit" class="font-mono text-emerald-400">R0.00</span></div>
-          <div class="flex justify-between font-bold pt-2 border-t border-slate-800"><span>Total</span><span id="total" class="font-mono text-emerald-400">R0.00</span></div>
+
+      <div class="card" style="align-self:start;position:sticky;top:20px">
+        <div class="card-head"><div><h3>Current sale</h3><p class="sub" id="cart-count">0 items</p></div>
+          <button class="btn btn-ghost btn-sm" id="clear">Clear</button></div>
+        <div id="cart" class="cart-list"></div>
+        <div class="divider"></div>
+        <div class="stack-sm">
+          <div class="row"><span class="k">Subtotal</span><span class="mono" id="subtotal">R0.00</span></div>
+          <div class="row"><span class="k">Est. profit</span><span class="mono" style="color:var(--primary)" id="profit">R0.00</span></div>
         </div>
-        <div class="grid grid-cols-3 gap-2 mt-3" id="pay-methods">
-          <button data-m="cash" class="pay-btn border border-emerald-500 bg-emerald-600/20 text-emerald-400 rounded-xl py-2 text-xs font-semibold">Cash</button>
-          <button data-m="card" class="pay-btn border border-slate-700 bg-slate-800 text-slate-300 rounded-xl py-2 text-xs font-semibold">Card</button>
-          <button data-m="rlusd" class="pay-btn border border-slate-700 bg-slate-800 text-slate-300 rounded-xl py-2 text-xs font-semibold">RLUSD</button>
+        <div class="divider"></div>
+        <div class="row total-row"><span>Total</span><span class="v" id="total">R0.00</span></div>
+        <div class="segmented" id="methods" style="margin-top:16px">
+          <button data-m="cash" class="active">💵 Cash</button><button data-m="card">💳 Card</button><button data-m="rlusd">🪙 RLUSD</button>
         </div>
-        <input id="cash" type="number" placeholder="Cash tendered (R)" class="w-full mt-3 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white"/>
-        <div class="flex justify-between text-xs text-slate-400 mt-1"><span>Change due</span><span id="change" class="font-mono text-emerald-400">R0.00</span></div>
-        <button id="complete" class="btn-primary w-full mt-4">Complete Sale</button>
+        <div id="cash-box" style="margin-top:12px">
+          <div class="field"><label for="cash">Cash tendered</label><input id="cash" type="number" min="0" step="0.5" class="input" placeholder="0.00"/></div>
+          <div class="row" style="margin-top:8px;font-size:13px"><span class="k">Change due</span><span class="mono" id="change" style="color:var(--primary)">R0.00</span></div>
+        </div>
+        <button id="complete" class="btn btn-primary btn-block" style="margin-top:16px;padding:14px">Complete sale</button>
       </div>
-    </div>
-  `;
+    </div>`;
 
-  const catalog = root.querySelector('#catalog');
-  const drawCatalog = (filter = '') => {
-    catalog.innerHTML = inventory
-      .filter(p => p.name.toLowerCase().includes(filter.toLowerCase()) || p.barcode.includes(filter))
-      .map(p => `
-        <button data-id="${p.id}" class="bg-slate-950 border ${p.qty <= p.lowStock ? 'border-amber-500/50' : 'border-slate-800'} rounded-xl p-4 text-left hover:border-emerald-500/50 transition">
-          <div class="text-xs text-slate-400 font-mono">${p.category}</div>
-          <div class="font-bold text-sm mt-1 text-white">${p.name}</div>
-          <div class="text-xs text-slate-500 font-mono">${p.barcode}</div>
-          <div class="flex justify-between mt-2 pt-2 border-t border-slate-900">
-            <span class="font-mono text-emerald-400 font-bold">R${p.price.toFixed(2)}</span>
-            <span class="text-xs text-slate-400">Stock: ${p.qty}</span>
-          </div>
-        </button>
-      `).join('') || '<div class="col-span-full text-center text-slate-500 py-6 text-sm">No products found</div>';
+  const $ = (s) => root.querySelector(s);
+  const byId = (id) => inventory.find((p) => p.id === id);
+  const totals = () => {
+    let sub = 0, profit = 0, count = 0;
+    cart.forEach((q, id) => { const p = byId(id); if (p) { sub += p.price * q; profit += (p.price - p.cost) * q; count += q; } });
+    return { sub, profit, count };
   };
-  drawCatalog();
-  root.querySelector('#search').addEventListener('input', (e) => drawCatalog(e.target.value));
-  catalog.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-id]');
-    if (!btn) return;
-    const item = inventory.find(p => p.id === btn.dataset.id);
-    const existing = cart.find(c => c.id === item.id);
-    if (existing) existing.qty++;
-    else cart.push({ id: item.id, name: item.name, price: item.price, cost: item.cost, qty: 1 });
-    drawCart();
+
+  function drawCatalog() {
+    const f = filter.toLowerCase();
+    const list = inventory.filter((p) => p.name.toLowerCase().includes(f) || p.barcode.includes(f) || (p.category || '').toLowerCase().includes(f));
+    $('#catalog').innerHTML = list.map((p) => {
+      const left = p.qty - (cart.get(p.id) || 0);
+      return `
+      <button class="product ${p.qty <= p.lowStock ? 'low' : ''} ${left <= 0 ? 'out' : ''}" data-id="${esc(p.id)}">
+        <div class="emoji">${emojiFor(p.category)}</div>
+        <div class="name">${esc(p.name)}</div>
+        <div class="meta">${esc(p.barcode)}</div>
+        <div class="foot"><span class="price">${money(p.price)}</span><span class="stock">${left <= 0 ? 'Sold out' : left + ' left'}</span></div>
+      </button>`;
+    }).join('') || `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div>No products match “${esc(filter)}”</div>`;
+  }
+
+  function drawCart() {
+    const { sub, profit, count } = totals();
+    $('#cart').innerHTML = cart.size ? [...cart].map(([id, q]) => {
+      const p = byId(id);
+      return `
+      <div class="cart-item">
+        <div style="font-size:22px">${emojiFor(p.category)}</div>
+        <div class="info"><b>${esc(p.name)}</b><span>${money(p.price)} each</span></div>
+        <div class="qty"><button data-dec="${esc(id)}" aria-label="Decrease">−</button><span>${q}</span><button data-inc="${esc(id)}" aria-label="Increase">+</button></div>
+      </div>`;
+    }).join('') : `<div class="empty"><div class="big">🛒</div>Cart is empty</div>`;
+    $('#cart-count').textContent = `${count} item${count === 1 ? '' : 's'}`;
+    $('#subtotal').textContent = money(sub);
+    $('#profit').textContent = money(profit);
+    $('#total').textContent = money(sub);
+    updateChange();
+    drawCatalog();
+  }
+
+  function updateChange() {
+    const t = parseFloat($('#cash').value) || 0;
+    $('#change').textContent = money(Math.max(0, t - totals().sub));
+  }
+
+  function add(id) {
+    const p = byId(id); if (!p) return;
+    const q = cart.get(id) || 0;
+    if (q >= p.qty) return toast(`Only ${p.qty} ${p.name} in stock`, 'error');
+    cart.set(id, q + 1); drawCart();
+  }
+
+  $('#catalog').addEventListener('click', (e) => { const b = e.target.closest('[data-id]'); if (b) add(b.dataset.id); });
+  $('#cart').addEventListener('click', (e) => {
+    const inc = e.target.closest('[data-inc]'); const dec = e.target.closest('[data-dec]');
+    if (inc) add(inc.dataset.inc);
+    if (dec) { const id = dec.dataset.dec; const q = cart.get(id) - 1; q > 0 ? cart.set(id, q) : cart.delete(id); drawCart(); }
+  });
+  $('#search').addEventListener('input', (e) => { filter = e.target.value.trim(); drawCatalog(); });
+  $('#search').addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter' || !/^\d{6,14}$/.test(filter)) return;
+    try { const r = await api.inventoryByBarcode(filter); add(r.item.id); e.target.value = ''; filter = ''; drawCatalog(); toast(`Scanned ${r.item.name}`); }
+    catch (err) { toast(err.message, 'error'); }
+  });
+  $('#clear').addEventListener('click', () => { cart.clear(); drawCart(); });
+  $('#cash').addEventListener('input', updateChange);
+  $('#methods').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-m]'); if (!b) return;
+    method = b.dataset.m;
+    root.querySelectorAll('#methods button').forEach((x) => x.classList.toggle('active', x === b));
+    $('#cash-box').style.display = method === 'cash' ? '' : 'none';
   });
 
-  const drawCart = () => {
-    const cartEl = root.querySelector('#cart');
-    if (cart.length === 0) {
-      cartEl.innerHTML = '<div class="text-center py-6 text-slate-500 text-sm">Cart is empty</div>';
-    } else {
-      cartEl.innerHTML = cart.map((c, i) => `
-        <div class="flex justify-between items-center bg-slate-950 p-2 rounded-lg border border-slate-800">
-          <div>
-            <div class="text-sm font-bold text-white">${c.name}</div>
-            <div class="text-xs text-slate-400">R${c.price.toFixed(2)} x ${c.qty}</div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="font-mono text-emerald-400 text-sm font-bold">R${(c.price * c.qty).toFixed(2)}</span>
-            <button data-del="${i}" class="text-rose-400 text-xs">x</button>
-          </div>
-        </div>
-      `).join('');
-      cartEl.querySelectorAll('button[data-del]').forEach(b => {
-        b.addEventListener('click', () => { cart.splice(+b.dataset.del, 1); drawCart(); });
-      });
-    }
-    const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
-    const profit = cart.reduce((s, c) => s + (c.price - c.cost) * c.qty, 0);
-    root.querySelector('#subtotal').textContent = 'R' + subtotal.toFixed(2);
-    root.querySelector('#profit').textContent = 'R' + profit.toFixed(2);
-    root.querySelector('#total').textContent = 'R' + subtotal.toFixed(2);
-  };
-  drawCart();
-
-  root.querySelector('#pay-methods').addEventListener('click', (e) => {
-    const b = e.target.closest('.pay-btn');
-    if (!b) return;
-    paymentMethod = b.dataset.m;
-    root.querySelectorAll('.pay-btn').forEach(x => {
-      x.className = 'pay-btn border rounded-xl py-2 text-xs font-semibold ' +
-        (x.dataset.m === paymentMethod
-          ? 'border-emerald-500 bg-emerald-600/20 text-emerald-400'
-          : 'border-slate-700 bg-slate-800 text-slate-300');
-    });
-  });
-
-  root.querySelector('#cash').addEventListener('input', () => {
-    const sub = cart.reduce((s, c) => s + c.price * c.qty, 0);
-    const tendered = parseFloat(root.querySelector('#cash').value) || 0;
-    const change = Math.max(0, tendered - sub);
-    root.querySelector('#change').textContent = 'R' + change.toFixed(2);
-  });
-
-  root.querySelector('#complete').addEventListener('click', async () => {
-    if (cart.length === 0) return toast('Cart is empty', 'error');
+  $('#complete').addEventListener('click', async () => {
+    const { sub } = totals();
+    if (!cart.size) return toast('Cart is empty', 'error');
+    const tendered = parseFloat($('#cash').value) || 0;
+    if (method === 'cash' && tendered < sub) return toast(`Cash tendered is short by ${money(sub - tendered)}`, 'error');
+    const btn = $('#complete'); btn.disabled = true; btn.textContent = 'Processing…';
     try {
-      const res = await api.sale({
-        items: cart.map(c => ({ productId: c.id, quantity: c.qty })),
-        paymentMethod,
-        cashTendered: parseFloat(root.querySelector('#cash').value) || 0,
-      });
-      toast('Sale ' + res.sale.saleId + ' completed! Profit R' + res.sale.profit.toFixed(2));
-      cart.length = 0;
-      const fresh = await api.inventory();
-      inventory.length = 0;
-      inventory.push(...fresh.inventory);
-      drawCatalog();
+      const res = await api.sale({ items: [...cart].map(([productId, quantity]) => ({ productId, quantity })), paymentMethod: method, cashTendered: tendered });
+      toast(`${res.sale.saleId} done · ${money(res.sale.subtotal)}${res.sale.changeDue ? ' · change ' + money(res.sale.changeDue) : ''}`);
+      cart.clear(); $('#cash').value = '';
+      inventory = (await api.inventory()).inventory;
       drawCart();
     } catch (err) { toast(err.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Complete sale'; }
   });
+
+  $('#add-product').addEventListener('click', () => openProductModal(api, async () => {
+    inventory = (await api.inventory()).inventory; drawCatalog();
+  }));
+
+  drawCart();
+}
+
+function openProductModal(api, onSaved) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <form class="modal stack" id="product-form">
+      <div><h3 style="font-size:19px">Add product</h3><p class="sub" style="margin:4px 0 0">New items appear in the POS instantly.</p></div>
+      <div class="field"><label>Name</label><input class="input" name="name" required placeholder="e.g. Sugar (2kg)"/></div>
+      <div class="grid g-2" style="gap:12px">
+        <div class="field"><label>Barcode</label><input class="input" name="barcode" required pattern="\\d{6,14}" placeholder="6001234567890"/></div>
+        <div class="field"><label>Category</label>
+          <select class="input" name="category">${['Staples', 'Bakery', 'Dairy', 'Meat & Poultry', 'Beverages', 'Snacks', 'Household'].map((c) => `<option>${c}</option>`).join('')}</select></div>
+        <div class="field"><label>Cost (R)</label><input class="input" name="cost" type="number" step="0.01" min="0" required/></div>
+        <div class="field"><label>Price (R)</label><input class="input" name="price" type="number" step="0.01" min="0.01" required/></div>
+        <div class="field"><label>Quantity</label><input class="input" name="qty" type="number" min="0" required value="10"/></div>
+        <div class="field"><label>Low-stock alert</label><input class="input" name="lowStock" type="number" min="0" value="5"/></div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button type="button" class="btn btn-ghost" id="cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save product</button>
+      </div>
+    </form>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.addEventListener('click', (e) => { if (e.target === bg) close(); });
+  bg.querySelector('#cancel').addEventListener('click', close);
+  bg.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try {
+      const r = await api.addProduct({ ...f, cost: +f.cost, price: +f.price, qty: +f.qty, lowStock: +f.lowStock || 0 });
+      toast(`${r.item.name} added`); close(); onSaved();
+    } catch (err) { toast(err.message, 'error'); }
+  });
+  bg.querySelector('input').focus();
 }

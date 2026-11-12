@@ -1,19 +1,43 @@
 const BASE = '/api';
-async function json(res) {
-  if (!res.ok) throw new Error((await res.json()).error || 'Request failed');
-  return res.json();
+
+async function request(path, options = {}) {
+  let res;
+  try {
+    res = await fetch(BASE + path, {
+      ...options,
+      headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+    });
+  } catch {
+    throw new Error('Cannot reach the backend — is it running on port 8080?');
+  }
+  let data = null;
+  try { data = await res.json(); } catch { /* empty body */ }
+  if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
+  return data;
 }
+
+const post = (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) });
+
 export const api = {
-  health: () => fetch(`${BASE}/health`).then(json),
-  inventory: () => fetch(`${BASE}/pos/inventory`).then(json),
-  inventoryByBarcode: (b) => fetch(`${BASE}/pos/inventory/barcode/${b}`).then(json),
-  addProduct: (body) => fetch(`${BASE}/pos/inventory`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(json),
-  sale: (body) => fetch(`${BASE}/pos/sale`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(json),
-  shortages: () => fetch(`${BASE}/agent/shortages`).then(json),
-  approveGroupBuy: (body) => fetch(`${BASE}/agent/group-buy/approve`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(json),
-  xrplStatus: () => fetch(`${BASE}/xrpl/status`).then(json),
-  pay: (body) => fetch(`${BASE}/xrpl/pay`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(json),
-  mandates: () => fetch(`${BASE}/mandates`).then(json),
-  createMandate: (body) => fetch(`${BASE}/mandates`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(json),
-  evidencePack: (ref) => fetch(`${BASE}/disputes/${ref}/evidence-pack`).then(json),
+  health: () => request('/health'),
+  inventory: () => request('/pos/inventory'),
+  inventoryByBarcode: (b) => request(`/pos/inventory/barcode/${encodeURIComponent(b)}`),
+  addProduct: (body) => post('/pos/inventory', body),
+  sale: (body) => post('/pos/sale', body),
+  sales: () => request('/pos/sales'),
+  shortages: () => request('/agent/shortages'),
+  approveGroupBuy: (body) => post('/agent/group-buy/approve', body),
+  xrplStatus: () => request('/xrpl/status'),
+  pay: (body) => post('/xrpl/pay', body),
+  mandates: () => request('/mandates'),
+  createMandate: (body) => post('/mandates', body),
+  evidencePack: (ref) => request(`/disputes/${encodeURIComponent(ref)}/evidence-pack`),
+  platformOverview: () => request('/platform/overview'),
+  suppliers: () => request('/platform/suppliers'),
+  notifications: () => request('/platform/notifications'),
+  stepUp: (action) => post('/platform/step-up', { action }),
+  orders: () => request('/platform/orders'),
+  createOrder: (body) => post('/platform/orders', body),
+  supplierAction: (id, action) => post(`/platform/orders/${encodeURIComponent(id)}/supplier-action`, { action }),
+  confirmDelivery: (id) => post(`/platform/orders/${encodeURIComponent(id)}/owner-confirmation`),
 };

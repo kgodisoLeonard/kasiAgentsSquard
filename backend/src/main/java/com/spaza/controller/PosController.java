@@ -15,12 +15,27 @@ import java.util.*;
 public class PosController {
 
     private final InMemoryStore store;
+    private final List<Map<String, Object>> sales = Collections.synchronizedList(new ArrayList<>());
 
     public PosController(InMemoryStore store) { this.store = store; }
 
     @GetMapping("/inventory")
     public Map<String, Object> inventory() {
         return Map.of("success", true, "inventory", store.findAll());
+    }
+
+    @GetMapping("/sales")
+    public Map<String, Object> salesHistory() {
+        double revenue = 0, profit = 0;
+        synchronized (sales) {
+            for (Map<String, Object> s : sales) {
+                revenue += (Double) s.get("subtotal");
+                profit += (Double) s.get("profit");
+            }
+            List<Map<String, Object>> recent = new ArrayList<>(sales);
+            Collections.reverse(recent);
+            return Map.of("success", true, "count", sales.size(), "revenue", revenue, "profit", profit, "sales", recent);
+        }
     }
 
     @GetMapping("/inventory/barcode/{barcode}")
@@ -41,23 +56,27 @@ public class PosController {
     }
 
     @PostMapping("/sale")
-    public ResponseEntity<?> sale(@RequestBody SaleRequest req) {
+    public synchronized ResponseEntity<?> sale(@RequestBody SaleRequest req) {
         if (req.getItems() == null || req.getItems().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Cart is empty"));
+        }
+
+        // Validate everything first so a failed sale never partially deducts stock
+        for (SaleItem si : req.getItems()) {
+            Optional<Product> op = store.findById(si.getProductId());
+            if (op.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Product not found"));
+            }
+            if (si.getQuantity() <= 0 || op.get().getQty() < si.getQuantity()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Insufficient stock: " + op.get().getName()));
+            }
         }
 
         double subtotal = 0, totalCost = 0;
         List<Map<String, Object>> lines = new ArrayList<>();
 
         for (SaleItem si : req.getItems()) {
-            Optional<Product> op = store.findById(si.getProductId());
-            if (op.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Product not found"));
-            }
-            Product p = op.get();
-            if (p.getQty() < si.getQuantity()) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Insufficient stock: " + p.getName()));
-            }
+            Product p = store.findById(si.getProductId()).orElseThrow();
             p.setQty(p.getQty() - si.getQuantity());
             subtotal += p.getPrice() * si.getQuantity();
             totalCost += p.getCost() * si.getQuantity();
@@ -83,6 +102,7 @@ public class PosController {
         sale.put("profit", profit);
         sale.put("paymentMethod", req.getPaymentMethod());
         sale.put("changeDue", change);
+        sales.add(sale);
 
         return ResponseEntity.ok(Map.of("success", true, "sale", sale));
     }
