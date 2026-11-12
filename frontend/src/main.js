@@ -9,8 +9,11 @@ import { renderMandates } from './pages/mandates.js';
 import { renderDisputes } from './pages/disputes.js';
 import { renderPlatform } from './pages/platform.js';
 import { renderRules } from './pages/rules.js';
+import { renderLogin } from './pages/login.js';
+import { renderSupplier } from './pages/supplier.js';
 
-const routes = {
+const user = JSON.parse(localStorage.getItem('spaza_user') || 'null');
+const ownerRoutes = {
   dashboard: { label: 'Dashboard', title: 'Good day, Thandi 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
   pos: { label: 'Point of Sale', title: 'Point of Sale', sub: 'Tap or scan products to ring up a sale.', render: renderPOS },
   agent: { label: 'Group Buys', title: 'AI Group Buying', sub: 'Your agent spots shortages and pools orders with nearby shops.', render: renderAgent },
@@ -20,6 +23,13 @@ const routes = {
   platform: { label: 'Trust Centre', title: 'Trust Centre', sub: 'Verification, marketplace, credit and security controls.', render: renderPlatform },
   rules: { label: 'Human Rules', title: 'Human Rules', sub: 'Owner controls for agent stock and ordering decisions.', render: renderRules },
 };
+const routes = user?.role === 'SUPPLIER'
+  ? { supplier: { label: 'Supplier Orders', title: 'Supplier Orders', sub: 'Agent-created orders from verified spaza owners.', render: renderSupplier } }
+  : ownerRoutes;
+
+if (!user) {
+  renderLogin(document.getElementById('app'), api);
+} else {
 
 const navButtons = (cls = '', only) => Object.entries(routes).filter(([id]) => !only || only.includes(id)).map(([id, r]) => `
   <button class="nav-btn ${cls}" data-tab="${id}" id="nav-${id}${cls ? '-m' : ''}">${icons[id]}<span>${r.label}</span></button>`).join('');
@@ -115,4 +125,5 @@ function tickClock() {
 
 checkHealth(); setInterval(checkHealth, 15000);
 tickClock(); setInterval(tickClock, 30000);
-showTab(location.hash.slice(1) || 'dashboard');
+showTab(location.hash.slice(1) || (user.role === 'SUPPLIER' ? 'supplier' : 'dashboard'));
+}

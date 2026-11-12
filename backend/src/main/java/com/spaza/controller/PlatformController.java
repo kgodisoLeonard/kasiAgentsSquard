@@ -20,7 +20,7 @@ public class PlatformController {
 
   public PlatformController(InMemoryStore store) {
     this.store = store;
-    orders.add(order("ORD-2026-0412", "Mokoena Meats", "Minced Meat", 20, 65.0, "SUPPLIER_REVIEW", "Thandi Mokone"));
+    Map<String,Object> initial=order("ORD-2026-0412", "Mokoena Meats", "Minced Meat", 20, 65.0, "SUPPLIER_REVIEW", "Thandi Mokone"); initial.put("createdBy","Spaza Finance Agent"); initial.put("reason","Low-stock group-buy recommendation"); orders.add(initial);
   }
 
   @GetMapping("/overview") public Map<String,Object> overview() {
@@ -49,7 +49,7 @@ public class PlatformController {
     int quantity=((Number)input.getOrDefault("quantity",10)).intValue();
     double price=((Number)input.getOrDefault("unitPrice",65)).doubleValue();
     if(quantity < 1) throw new IllegalArgumentException("Quantity must be at least 1");
-    Map<String,Object> order=order("ORD-"+(1000+orders.size()+1),supplier,product,quantity,price,"SUPPLIER_REVIEW","Thandi Mokone");
+    Map<String,Object> order=order("ORD-"+(1000+orders.size()+1),supplier,product,quantity,price,"SUPPLIER_REVIEW","Thandi Mokone"); order.put("createdBy","Spaza Finance Agent"); order.put("reason","Owner-approved agent shortage recommendation");
     orders.add(0,order); log("OWNER_ORDER_REQUESTED",supplier+" · "+quantity+" kg "+product);
     return Map.of("success",true,"order",order,"message","Request sent to the verified supplier. No funds are released until delivery confirmation.");
   }

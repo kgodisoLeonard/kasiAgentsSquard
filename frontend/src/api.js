@@ -22,6 +22,7 @@ async function request(path, options = {}) {
 const post = (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) });
 
 export const api = {
+  login: (body) => post('/auth/login', body),
   health: () => request('/health'),
   inventory: () => request('/pos/inventory'),
   inventoryByBarcode: (b) => request(`/pos/inventory/barcode/${encodeURIComponent(b)}`),
