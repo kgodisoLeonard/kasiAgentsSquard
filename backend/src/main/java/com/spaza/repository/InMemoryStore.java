@@ -19,6 +19,10 @@ public class InMemoryStore {
         products.add(product("Full Cream Milk (2L)", "600124958102", "Dairy", 28, 26.0, 32.0, 10));
         products.add(product("Maize Meal (10kg)", "600106839201", "Staples", 8, 85.0, 105.0, 10));
         products.add(product("Coca-Cola (2L)", "5449000000996", "Beverages", 40, 20.0, 26.0, 12));
+        products.add(product("Ace Maize Meal (2.5kg)", "600100100001", "Staples", 9, 32.0, 42.0, 10));
+        products.add(product("Sunlight Dishwashing Liquid (750ml)", "600108737001", "Household", 6, 21.0, 30.0, 10));
+        products.add(product("Five Roses Tea (100 bags)", "600100111001", "Groceries", 4, 38.0, 52.0, 10));
+        products.add(product("Albany Superior Bread", "600106800001", "Bakery", 14, 13.0, 18.0, 10));
     }
 
     private Product product(String name, String barcode, String cat, int qty, double cost, double price, int low) {

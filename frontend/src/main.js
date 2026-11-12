@@ -8,6 +8,7 @@ import { renderWallet } from './pages/wallet.js';
 import { renderMandates } from './pages/mandates.js';
 import { renderDisputes } from './pages/disputes.js';
 import { renderPlatform } from './pages/platform.js';
+import { renderRules } from './pages/rules.js';
 
 const routes = {
   dashboard: { label: 'Dashboard', title: 'Good day, Thandi 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
@@ -17,6 +18,7 @@ const routes = {
   mandates: { label: 'Mandates', title: 'Spending Mandates', sub: 'Hard limits your AI agent can never exceed.', render: renderMandates },
   disputes: { label: 'Disputes', title: 'Disputes & Evidence', sub: 'Tamper-evident, SHA-256 fingerprinted evidence packs.', render: renderDisputes },
   platform: { label: 'Trust Centre', title: 'Trust Centre', sub: 'Verification, marketplace, credit and security controls.', render: renderPlatform },
+  rules: { label: 'Human Rules', title: 'Human Rules', sub: 'Owner controls for agent stock and ordering decisions.', render: renderRules },
 };
 
 const navButtons = (cls = '', only) => Object.entries(routes).filter(([id]) => !only || only.includes(id)).map(([id, r]) => `

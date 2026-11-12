@@ -40,4 +40,6 @@ export const api = {
   createOrder: (body) => post('/platform/orders', body),
   supplierAction: (id, action) => post(`/platform/orders/${encodeURIComponent(id)}/supplier-action`, { action }),
   confirmDelivery: (id) => post(`/platform/orders/${encodeURIComponent(id)}/owner-confirmation`),
+  agentRules: () => request('/agent/rules'),
+  saveAgentRules: (body) => request('/agent/rules', {method:'PUT',body:JSON.stringify(body)}),
 };
