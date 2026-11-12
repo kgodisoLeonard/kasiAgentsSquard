@@ -1,0 +1,8 @@
+body { font-family: system-ui, -apple-system, sans-serif; }
+.card { background:#0f172a; border:1px solid #1e293b; border-radius:1rem; padding:1.5rem; box-shadow:0 10px 15px -3px rgb(0 0 0 / 0.3); }
+.btn-primary { padding:0.625rem 1rem; background:#059669; color:white; border-radius:0.75rem; font-weight:600; transition:.2s; cursor:pointer; border:none; }
+.btn-primary:hover { background:#10b981; }
+.btn-primary:disabled { opacity:0.5; cursor:not-allowed; }
+.btn-secondary { padding:0.625rem 1rem; background:#1e293b; color:#e2e8f0; border-radius:0.75rem; transition:.2s; cursor:pointer; }
+.btn-secondary:hover { background:#334155; }
+input { color: white; }
