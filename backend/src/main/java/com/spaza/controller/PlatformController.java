@@ -43,6 +43,14 @@ public class PlatformController {
     return Map.of("success",true,"notifications",notices,"delivery","In-app notifications (SMS/WhatsApp adapter simulated)");
   }
   @GetMapping("/orders") public Map<String,Object> orders() { return Map.of("success",true,"orders",orders); }
+  /** Called by the shortage agent only after human rules have enabled automatic drafts. */
+  public synchronized Map<String,Object> createAgentDraft(String product, int quantity, double unitPrice) {
+    Optional<Map<String,Object>> existing=orders.stream().filter(o -> product.equals(o.get("product")) && !"ESCROW_RELEASED".equals(o.get("status"))).findFirst();
+    if(existing.isPresent()) return existing.get();
+    String supplier=product.toLowerCase().contains("maize") ? "Ubuntu Foods Co-op" : "Mokoena Meats";
+    Map<String,Object> order=order("ORD-AI-"+(1000+orders.size()+1),supplier,product,quantity,unitPrice,"SUPPLIER_REVIEW","Thandi Mokone");
+    order.put("createdBy","Spaza Finance Agent"); order.put("reason","Automatic draft: stock below human-approved threshold"); orders.add(0,order); log("AGENT_ORDER_DRAFTED",product+" · "+quantity); return order;
+  }
   @PostMapping("/orders") public synchronized Map<String,Object> createOrder(@RequestBody Map<String,Object> input) {
     String supplier=String.valueOf(input.getOrDefault("supplier","Mokoena Meats"));
     String product=String.valueOf(input.getOrDefault("product","Minced Meat"));

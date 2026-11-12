@@ -8,7 +8,7 @@ import java.util.*;
 public class AgentPolicy {
   private int warningThreshold = 10;
   private int autoOrderThreshold = 5;
-  private boolean autoOrderEnabled = false;
+  private boolean autoOrderEnabled = true;
   private boolean xrplTestnetOnly = true;
   private double agentSpentToday = 0.0;
   private static final double PER_TRANSACTION_CAP = 1000.0, DAILY_CAP = 5000.0, HUMAN_APPROVAL_ABOVE = 2000.0;

@@ -8,8 +8,8 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/agent")
 public class AgentController {
-    private final InMemoryStore store; private final AgentPolicy policy;
-    public AgentController(InMemoryStore store, AgentPolicy policy){this.store=store;this.policy=policy;}
+    private final InMemoryStore store; private final AgentPolicy policy; private final PlatformController platform;
+    public AgentController(InMemoryStore store, AgentPolicy policy, PlatformController platform){this.store=store;this.policy=policy;this.platform=platform;}
 
     /** The agent's only configuration input: a read-only guardrail snapshot. Mandates are never exposed here. */
     @GetMapping("/rules")
@@ -36,6 +36,7 @@ public class AgentController {
         for(Product p:store.findAll()) if(p.getQty() < policy.warningThreshold()) {
             int required=Math.max(10,p.getLowStock()*3-p.getQty()); double delivery=250.0; double wholesale=Math.round(p.getCost()*1.08*100.0)/100.0;
             boolean auto=policy.autoOrderEnabled() && p.getQty() < policy.autoOrderThreshold();
+            if (auto) platform.createAgentDraft(p.getName(), required, wholesale);
             signals.add(Map.of("product",p.getName(),"stock",p.getQty(),"warning",policy.warningThreshold(),"autoOrder",auto));
             groups.add(Map.ofEntries(Map.entry("id","GB-"+p.getId().substring(5).toUpperCase()),Map.entry("product",p.getName()),Map.entry("targetQty",required*5),Map.entry("currentQty",required*3),Map.entry("unitPrice",p.getPrice()),Map.entry("wholesalePrice",wholesale),Map.entry("deliveryFee",delivery),Map.entry("status",auto?"AUTO_ORDER_DRAFTED":"AWAITING_MEMBER_APPROVAL"),Map.entry("deadline","18h"),Map.entry("community","Mamelodi Central Buying Club"),Map.entry("memberCount",5),Map.entry("costSplit",Map.of("method","BY_QUANTITY","yourShare",required,"goods",required*wholesale,"delivery",delivery/5,"total",required*wholesale+delivery/5))));
         }
