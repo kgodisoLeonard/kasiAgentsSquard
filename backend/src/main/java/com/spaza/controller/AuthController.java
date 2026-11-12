@@ -1,17 +1,32 @@
 package com.spaza.controller;
 
+import com.spaza.model.AppUser;
+import com.spaza.repository.AppUserRepository;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import java.util.*;
 
-/** Demo identity gateway. Replace seeded accounts with OIDC/MFA in production. */
 @RestController @RequestMapping("/api/auth")
 public class AuthController {
+  private final AppUserRepository users;
+  private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+  public AuthController(AppUserRepository users) { this.users = users; }
+
   @PostMapping("/login") public ResponseEntity<?> login(@RequestBody Map<String,Object> body) {
-    String email=String.valueOf(body.getOrDefault("email","")).trim().toLowerCase(Locale.ROOT);
-    String password=String.valueOf(body.getOrDefault("password", ""));
-    if ("owner@spaza.local".equals(email) && "spaza123".equals(password)) return ResponseEntity.ok(Map.of("success",true,"user",Map.of("name","Thandi Mokone","role","OWNER","shop","Thandi's Spaza","verified",true)));
-    if ("supplier@mokoena.local".equals(email) && "supplier123".equals(password)) return ResponseEntity.ok(Map.of("success",true,"user",Map.of("name","Mokoena Meats","role","SUPPLIER","shop","Mokoena Meats (Pty) Ltd","verified",true)));
-    return ResponseEntity.status(401).body(Map.of("error","Invalid email or password"));
+    String email=text(body,"email").toLowerCase(Locale.ROOT), password=text(body,"password");
+    Optional<AppUser> match=users.findByEmail(email).filter(user -> encoder.matches(password,user.getPasswordHash()));
+    return match.map(user -> ResponseEntity.ok(Map.of("success",true,"user",userView(user))))
+      .orElseGet(() -> ResponseEntity.status(401).body(Map.of("error","Invalid email or password")));
   }
+
+  @PostMapping("/register") public ResponseEntity<?> register(@RequestBody Map<String,Object> body) {
+    String name=text(body,"name"), email=text(body,"email").toLowerCase(Locale.ROOT), password=text(body,"password"), business=text(body,"businessName"), role=text(body,"role").toUpperCase(Locale.ROOT);
+    if(name.isBlank()||email.isBlank()||password.length()<6||business.isBlank()||!(role.equals("OWNER")||role.equals("SUPPLIER"))) return ResponseEntity.badRequest().body(Map.of("error","Name, business name, valid role and a password of at least 6 characters are required"));
+    if(users.existsByEmail(email)) return ResponseEntity.status(409).body(Map.of("error","An account with this email already exists"));
+    AppUser user=users.save(new AppUser(UUID.randomUUID().toString(),name,email,encoder.encode(password),role,business,false));
+    return ResponseEntity.status(201).body(Map.of("success",true,"user",userView(user)));
+  }
+  private String text(Map<String,Object> body,String key){return String.valueOf(body.getOrDefault(key,"" )).trim();}
+  private Map<String,Object> userView(AppUser user){return Map.of("id",user.getId(),"name",user.getName(),"email",user.getEmail(),"role",user.getRole(),"shop",user.getBusinessName(),"verified",user.isVerified());}
 }

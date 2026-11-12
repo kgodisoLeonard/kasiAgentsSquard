@@ -70,7 +70,17 @@ public class PlatformController {
   @PostMapping("/orders/{id}/owner-confirmation") public synchronized Map<String,Object> ownerConfirmation(@PathVariable String id) {
     Map<String,Object> order=orders.stream().filter(o->id.equals(o.get("id"))).findFirst().orElseThrow(()->new NoSuchElementException("Order not found"));
     if(!"DELIVERED_PENDING_OWNER".equals(order.get("status"))) throw new IllegalStateException("Delivery has not been marked ready for confirmation");
-    order.put("status","ESCROW_RELEASED"); order.put("ownerConfirmedAt",Instant.now().toString()); log("OWNER_DELIVERY_CONFIRMED",id); return Map.of("success",true,"order",order,"message","Delivery confirmed. Demo escrow released directly to the supplier.");
+    String deliveredAt=Instant.now().toString();
+    Product product=store.findByName(String.valueOf(order.get("product"))).orElse(null);
+    if (product != null) {
+      int received=((Number)order.get("quantity")).intValue();
+      product.setQty(product.getQty()+received);
+      product.setPrice(((Number)order.get("unitPrice")).doubleValue());
+      order.put("inventoryUpdated",true); order.put("inventoryQty",product.getQty()); order.put("inventoryPrice",product.getPrice());
+    }
+    order.put("status","DELIVERED"); order.put("escrow","RELEASED"); order.put("ownerConfirmedAt",deliveredAt);
+    Map<String,Object> receipt=new LinkedHashMap<>(); receipt.put("receiptNo","RCPT-"+id.replace("ORD-", "")); receipt.put("orderId",id); receipt.put("product",order.get("product")); receipt.put("quantity",order.get("quantity")); receipt.put("unitPrice",order.get("unitPrice")); receipt.put("total",order.get("total")); receipt.put("deliveredAt",deliveredAt); receipt.put("status","DELIVERED"); order.put("receipt",receipt);
+    log("OWNER_DELIVERY_CONFIRMED",id); return Map.of("success",true,"order",order,"receipt",receipt,"message","Delivery confirmed. Inventory and price updated; receipt issued.");
   }
   @PostMapping("/suppliers") public Map<String,Object> addSupplier(@RequestBody Map<String,Object> input) {
     Map<String,Object> s=new LinkedHashMap<>(input); s.put("id","SUP-"+(suppliers.size()+1)); s.put("verified",false); s.put("rating",0); s.put("deliveryDays",3); suppliers.add(s); log("SUPPLIER_SUBMITTED",String.valueOf(s.getOrDefault("name","Supplier"))); return Map.of("success",true,"supplier",s,"message","Supplier submitted for four-eyes verification review.");

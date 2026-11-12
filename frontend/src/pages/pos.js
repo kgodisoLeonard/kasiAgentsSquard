@@ -55,12 +55,13 @@ export async function renderPOS(root, api, alive) {
     $('#catalog').innerHTML = list.map((p) => {
       const left = p.qty - (cart.get(p.id) || 0);
       return `
-      <button class="product ${p.qty <= p.lowStock ? 'low' : ''} ${left <= 0 ? 'out' : ''}" data-id="${esc(p.id)}">
+      <div class="product ${p.qty <= p.lowStock ? 'low' : ''} ${left <= 0 ? 'out' : ''}" data-id="${esc(p.id)}" title="Click to update price">
         <div class="emoji">${emojiFor(p.category)}</div>
         <div class="name">${esc(p.name)}</div>
         <div class="meta">${esc(p.barcode)}</div>
         <div class="foot"><span class="price">${money(p.price)}</span><span class="stock">${left <= 0 ? 'Sold out' : left + ' left'}</span></div>
-      </button>`;
+        <div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn btn-ghost btn-sm" data-edit-price="${esc(p.id)}">Update price</button><button type="button" class="btn btn-primary btn-sm" data-add="${esc(p.id)}">Add</button></div>
+      </div>`;
     }).join('') || `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div>No products match “${esc(filter)}”</div>`;
   }
 
@@ -95,7 +96,7 @@ export async function renderPOS(root, api, alive) {
     cart.set(id, q + 1); drawCart();
   }
 
-  $('#catalog').addEventListener('click', (e) => { const b = e.target.closest('[data-id]'); if (b) add(b.dataset.id); });
+  $('#catalog').addEventListener('click', (e) => { const edit = e.target.closest('[data-edit-price]'); if (edit) return openPriceModal(api, byId(edit.dataset.editPrice), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); const addButton = e.target.closest('[data-add]'); if (addButton) return add(addButton.dataset.add); const card = e.target.closest('[data-id]'); if (card) openPriceModal(api, byId(card.dataset.id), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); });
   $('#cart').addEventListener('click', (e) => {
     const inc = e.target.closest('[data-inc]'); const dec = e.target.closest('[data-dec]');
     if (inc) add(inc.dataset.inc);
@@ -172,5 +173,14 @@ function openProductModal(api, onSaved) {
       toast(`${r.item.name} added`); close(); onSaved();
     } catch (err) { toast(err.message, 'error'); }
   });
+  bg.querySelector('input').focus();
+}
+
+function openPriceModal(api, product, onSaved) {
+  if (!product) return;
+  const bg = document.createElement('div'); bg.className = 'modal-bg';
+  bg.innerHTML = `<form class="modal stack" id="price-form"><div><h3 style="font-size:19px">Update price</h3><p class="sub" style="margin:4px 0 0">${esc(product.name)}</p></div><div class="field"><label>Price (R)</label><input class="input" name="price" type="number" min="0.01" step="0.01" value="${product.price}" required></div><div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px"><button type="button" class="btn btn-ghost" id="cancel">Cancel</button><button type="submit" class="btn btn-primary">Save price</button></div></form>`;
+  document.body.appendChild(bg); const close = () => bg.remove(); bg.querySelector('#cancel').onclick = close; bg.onclick = e => { if (e.target === bg) close(); };
+  bg.querySelector('form').onsubmit = async e => { e.preventDefault(); try { await api.updateProductPrice(product.id, Number(new FormData(e.target).get('price'))); toast(`${product.name} price updated`); close(); await onSaved(); } catch (err) { toast(err.message, 'error'); } };
   bg.querySelector('input').focus();
 }

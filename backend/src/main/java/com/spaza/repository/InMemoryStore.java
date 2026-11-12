@@ -52,4 +52,16 @@ public class InMemoryStore {
         products.add(product);
         return product;
     }
+
+    public Optional<Product> findByName(String name) {
+        String wanted = name == null ? "" : name.trim().toLowerCase();
+        return products.stream().filter(p -> {
+            String actual = p.getName().toLowerCase();
+            return actual.equals(wanted) || actual.startsWith(wanted) || wanted.startsWith(actual);
+        }).findFirst();
+    }
+
+    public Optional<Product> updatePrice(String id, double price) {
+        return findById(id).map(product -> { product.setPrice(price); return product; });
+    }
 }

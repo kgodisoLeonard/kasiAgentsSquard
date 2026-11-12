@@ -23,10 +23,12 @@ const post = (path, body) => request(path, { method: 'POST', body: JSON.stringif
 
 export const api = {
   login: (body) => post('/auth/login', body),
+  register: (body) => post('/auth/register', body),
   health: () => request('/health'),
   inventory: () => request('/pos/inventory'),
   inventoryByBarcode: (b) => request(`/pos/inventory/barcode/${encodeURIComponent(b)}`),
   addProduct: (body) => post('/pos/inventory', body),
+  updateProductPrice: (id, price) => request(`/pos/inventory/${encodeURIComponent(id)}/price`, { method: 'PUT', body: JSON.stringify({ price }) }),
   sale: (body) => post('/pos/sale', body),
   sales: () => request('/pos/sales'),
   shortages: () => request('/agent/shortages'),

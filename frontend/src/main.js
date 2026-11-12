@@ -34,7 +34,7 @@ if (!user) {
 } else {
 
 const navButtons = (cls = '', only) => Object.entries(routes).filter(([id]) => !only || only.includes(id)).map(([id, r]) => `
-  <button class="nav-btn ${cls}" data-tab="${id}" id="nav-${id}${cls ? '-m' : ''}">${icons[id]}<span>${r.label}</span></button>`).join('');
+  <button class="nav-btn ${cls}" data-tab="${id}" id="nav-${id}${cls ? '-m' : ''}">${icons[id] || ''}<span>${r.label}</span></button>`).join('');
 
 document.getElementById('app').innerHTML = `
   <header class="mobile-header">

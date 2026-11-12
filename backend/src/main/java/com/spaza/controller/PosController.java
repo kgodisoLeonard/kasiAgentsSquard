@@ -55,6 +55,15 @@ public class PosController {
         return ResponseEntity.status(201).body(Map.of("success", true, "item", p));
     }
 
+    @PutMapping("/inventory/{id}/price")
+    public ResponseEntity<?> updatePrice(@PathVariable String id, @RequestBody Map<String, Object> body) {
+        double price = ((Number) body.getOrDefault("price", 0)).doubleValue();
+        if (price <= 0) return ResponseEntity.badRequest().body(Map.of("error", "Price must be greater than zero"));
+        return store.updatePrice(id, price)
+                .<ResponseEntity<?>>map(p -> ResponseEntity.ok(Map.of("success", true, "item", p)))
+                .orElseGet(() -> ResponseEntity.status(404).body(Map.of("error", "Product not found")));
+    }
+
     @PostMapping("/sale")
     public synchronized ResponseEntity<?> sale(@RequestBody SaleRequest req) {
         if (req.getItems() == null || req.getItems().isEmpty()) {
