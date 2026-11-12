@@ -28,9 +28,9 @@ export async function renderWallet(root, api, alive) {
           <div class="field"><label for="dest">Destination address</label>
             <input id="dest" class="input mono" style="font-size:13px" value="${esc(status.rlusdIssuer)}" required/></div>
           <div class="field"><label for="amount">Amount (RLUSD)</label>
-            <input id="amount" class="input" type="number" min="0.01" step="0.01" value="250" required/></div>
+            <input id="amount" class="input" type="number" min="0.01" max="${status.perTxLimit}" step="0.01" value="250" required/></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            ${[50, 100, 250, 500, 1500].map((v) => `<button type="button" class="btn btn-ghost btn-sm" data-amt="${v}">${v}</button>`).join('')}
+            ${[50, 100, 250, 500, status.perTxLimit].map((v) => `<button type="button" class="btn btn-ghost btn-sm" data-amt="${v}">${v}</button>`).join('')}
           </div>
           <button id="pay" type="submit" class="btn btn-primary btn-block" style="padding:14px">Send payment</button>
         </form>
@@ -68,6 +68,8 @@ export async function renderWallet(root, api, alive) {
     e.preventDefault();
     const amount = parseFloat($('#amount').value);
     const destination = $('#dest').value.trim();
+    if (!Number.isFinite(amount) || amount <= 0) return toast('Enter a valid payment amount', 'error');
+    if (amount > status.perTxLimit) return toast(`Payment limit is ${money(status.perTxLimit)} per transaction. Split the payment or update a human-approved mandate.`, 'error');
     const btn = $('#pay'); btn.disabled = true; btn.textContent = 'Submitting…';
     log(`[SUBMIT] Payment ${num(amount)} RLUSD → ${esc(destination.slice(0, 12))}…`);
     try {
