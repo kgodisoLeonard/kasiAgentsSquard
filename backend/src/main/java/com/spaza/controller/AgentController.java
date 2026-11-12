@@ -18,6 +18,18 @@ public class AgentController {
                 "access", "READ_ONLY", "restrictedResources", List.of("mandates", "wallets", "bank_details", "identity_documents"));
     }
 
+    /** Enforces the human-owned allow-list before any XRPL payment draft is created. */
+    @PostMapping("/purchase-draft")
+    public org.springframework.http.ResponseEntity<?> purchaseDraft(@RequestBody Map<String,Object> body) {
+        String item=String.valueOf(body.getOrDefault("item", ""));
+        double price=((Number)body.getOrDefault("unitPrice",0)).doubleValue();
+        int quantity=((Number)body.getOrDefault("quantity",0)).intValue();
+        boolean verified=Boolean.TRUE.equals(body.get("verifiedSupplier"));
+        if(quantity<1 || price<=0)return org.springframework.http.ResponseEntity.badRequest().body(Map.of("error","Item price and quantity are required"));
+        Map<String,Object> result=policy.approvePurchase(item,price,quantity,verified);
+        return Boolean.TRUE.equals(result.get("allowed"))?org.springframework.http.ResponseEntity.ok(result):org.springframework.http.ResponseEntity.status(403).body(result);
+    }
+
     @GetMapping("/shortages")
     public Map<String, Object> shortages() {
         List<Map<String,Object>> groups=new ArrayList<>(); List<Map<String,Object>> signals=new ArrayList<>();
