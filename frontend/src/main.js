@@ -11,6 +11,7 @@ import { renderPlatform } from './pages/platform.js';
 import { renderRules } from './pages/rules.js';
 import { renderLogin } from './pages/login.js';
 import { renderSupplier } from './pages/supplier.js';
+import { renderMarketplace } from './pages/marketplace.js';
 
 let user = null;
 try { user = JSON.parse(localStorage.getItem('spaza_user') || 'null'); }
@@ -18,6 +19,7 @@ catch { localStorage.removeItem('spaza_user'); }
 const ownerRoutes = {
   dashboard: { label: 'Dashboard', title: 'Good day, Thandi 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
   pos: { label: 'Point of Sale', title: 'Point of Sale', sub: 'Tap or scan products to ring up a sale.', render: renderPOS },
+  marketplace: { label: 'Marketplace', title: 'Supplier Marketplace', sub: 'Choose verified products and place stock orders.', render: renderMarketplace },
   agent: { label: 'Group Buys', title: 'AI Group Buying', sub: 'Your agent spots shortages and pools orders with nearby shops.', render: renderAgent },
   wallet: { label: 'Wallet', title: 'RLUSD Wallet', sub: 'Send stablecoin payments on the XRPL Testnet.', render: renderWallet },
   mandates: { label: 'Mandates', title: 'Spending Mandates', sub: 'Hard limits your AI agent can never exceed.', render: renderMandates },
