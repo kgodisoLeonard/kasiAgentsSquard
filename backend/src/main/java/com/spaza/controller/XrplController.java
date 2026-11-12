@@ -44,8 +44,8 @@ public class XrplController {
         if (amount <= 0) return ResponseEntity.badRequest().body(Map.of("error", "Amount must be positive"));
 
         if (amount > perTxLimit) {
-            return ResponseEntity.status(403).body(Map.of(
-                "error", "Mandate violation: exceeds per-transaction cap",
+            return ResponseEntity.unprocessableEntity().body(Map.of(
+                "error", "Payment blocked by mandate: exceeds the per-transaction cap",
                 "cap", perTxLimit, "requested", amount));
         }
         if (destination.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Destination required"));

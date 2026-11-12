@@ -27,7 +27,7 @@ public class AgentController {
         boolean verified=Boolean.TRUE.equals(body.get("verifiedSupplier"));
         if(quantity<1 || price<=0)return org.springframework.http.ResponseEntity.badRequest().body(Map.of("error","Item price and quantity are required"));
         Map<String,Object> result=policy.approvePurchase(item,price,quantity,verified);
-        return Boolean.TRUE.equals(result.get("allowed"))?org.springframework.http.ResponseEntity.ok(result):org.springframework.http.ResponseEntity.status(403).body(result);
+        return Boolean.TRUE.equals(result.get("allowed")) ? org.springframework.http.ResponseEntity.ok(result) : org.springframework.http.ResponseEntity.unprocessableEntity().body(result);
     }
 
     @GetMapping("/shortages")

@@ -14,7 +14,7 @@ async function request(path, options = {}) {
   try { data = await res.json(); } catch { /* empty body */ }
   if (!res.ok) {
     const message = data && (data.error || data.reason || data.message);
-    throw new Error(message || `Request failed (${res.status})`);
+    throw new Error(message || (res.status === 422 ? 'Action blocked by the purchasing mandate.' : `Request failed (${res.status})`));
   }
   return data;
 }
