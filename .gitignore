@@ -17,6 +17,7 @@ dist/
 
 .DS_Store
 Thumbs.db
+data/
 
 *.seed
 wallet-seeds.json

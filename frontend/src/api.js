@@ -42,4 +42,6 @@ export const api = {
   confirmDelivery: (id) => post(`/platform/orders/${encodeURIComponent(id)}/owner-confirmation`),
   agentRules: () => request('/agent/rules'),
   saveAgentRules: (body) => request('/agent/rules', {method:'PUT',body:JSON.stringify(body)}),
+  agents: () => request('/agents'),
+  setAgentEnabled: (id, enabled) => post(`/agents/${encodeURIComponent(id)}/enabled`, { enabled }),
 };
