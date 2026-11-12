@@ -56,6 +56,7 @@ document.getElementById('app').innerHTML = `
       <div class="sidebar-foot">
         <div><span class="status-dot" id="api-dot"></span><span id="api-status">Checking API…</span></div>
         <div style="margin-top:6px;color:var(--dim)">XRPL Testnet · RLUSD</div>
+        <button class="btn btn-ghost btn-block" id="logout" style="margin-top:14px">Log out</button>
       </div>
     </aside>
     <main class="main">
@@ -84,6 +85,7 @@ document.getElementById('more-btn').addEventListener('click', () => setMenu(true
 document.getElementById('menu-close').addEventListener('click', () => setMenu(false));
 overlay.addEventListener('click', () => setMenu(false));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
+document.getElementById('logout').addEventListener('click', () => { localStorage.removeItem('spaza_user'); location.hash = ''; location.reload(); });
 
 const content = document.getElementById('content');
 let renderToken = 0;
