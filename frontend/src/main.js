@@ -85,13 +85,16 @@ document.getElementById('more-btn').addEventListener('click', () => setMenu(true
 document.getElementById('menu-close').addEventListener('click', () => setMenu(false));
 overlay.addEventListener('click', () => setMenu(false));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
-document.getElementById('logout').addEventListener('click', () => { localStorage.removeItem('spaza_user'); location.hash = ''; location.reload(); });
+document.getElementById('logout').addEventListener('click', () => { localStorage.removeItem('spaza_user'); window.location.assign(window.location.pathname + window.location.search); });
 
 const content = document.getElementById('content');
 let renderToken = 0;
 
 async function showTab(id) {
-  if (!routes[id]) id = 'dashboard';
+  if (!routes[id]) {
+    if (routes.dashboard) id = 'dashboard';
+    else return window.location.reload();
+  }
   const r = routes[id];
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === id));
   document.getElementById('page-title').textContent = r.title;
