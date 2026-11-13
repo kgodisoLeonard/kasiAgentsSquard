@@ -47,6 +47,9 @@ class RestartPersistenceTest {
       balance = thandi.get("/xrpl/status").body().get("rlusdBalance").asDouble();
       token = thandi.token();
       assertTrue(agentSpent > 0);
+      Api.Res registered = new Api(port(first)).post("/auth/register", Map.of("name", "New Owner", "businessName", "Brand New Spaza", "role", "OWNER",
+          "email", "newowner@test.local", "password", "N3w!Owner#2026"));
+      assertEquals(201, registered.status(), "a test-style email must not stop registration: " + registered.body());
       assertEquals(200, thandi.put("/human/rules", Map.of("warningThreshold", 12, "autoOrderThreshold", 4, "autoOrderEnabled", true)).status());
       assertEquals(200, new Api(port(first)).login("Ubuntu Foods Co-op", "supplier123").put("/supplier/prices", Map.of("product", "Maize Meal (10kg)", "unitPrice", 79.00)).status());
     } finally { first.close(); }
@@ -55,6 +58,8 @@ class RestartPersistenceTest {
     try {
       Api thandi = new Api(port(second)).withToken(token);
       assertEquals(200, thandi.get("/pos/inventory").status(), "signed-in session survives a restart");
+      Api fresh = new Api(port(second)).login("Brand New Spaza", "N3w!Owner#2026");
+      assertTrue(FeatureApiTest.inventory(fresh).size() >= 44, "a newly registered account survives a restart, with its stock");
       assertEquals(breadAfterSale, FeatureApiTest.product(thandi, BREAD).get("qty").asInt(), "stock survives");
       assertEquals(4, thandi.get("/human/rules").body().get("rules").get("autoOrderThreshold").asInt(), "Human Rules survive");
       assertEquals(79.00, SupplierPricesTest.priceOf(new Api(port(second)).login("Ubuntu Foods Co-op", "supplier123"), "Maize Meal (10kg)").get("unitPrice").asDouble(), 0.001,

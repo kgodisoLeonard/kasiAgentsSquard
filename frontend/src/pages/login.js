@@ -50,19 +50,8 @@ export function renderLogin(root, api) {
         ? { name: values.name.trim(), businessName: values.businessName.trim(), role: values.role, email: values.email.trim(), password: values.password }
         : { businessName: values.businessName.trim(), password: values.password };
       if (registering) {
-        const created = await api.register(body);
+        await api.register(body);   // saved straight away; no email confirmation
         registering = false;
-        if (created?.confirmEmail) {
-          // Supabase Auth requires email confirmation before the first sign-in.
-          updateMode();
-          form.reset();
-          form.querySelector('input[name="businessName"]').value = body.businessName;
-          error.textContent = created.next;
-          error.classList.add('auth-notice');
-          error.hidden = false;
-          submit.disabled = false;
-          return;
-        }
       }
       // Business name + password signs straight in (no SMS code).
       const result = await api.login({ businessName: body.businessName, password: body.password });

@@ -40,7 +40,6 @@ public class AuthService {
   private final AppUserRepository users;
   private final AuditLog audit;
   private final Clock clock;
-  private final SupabaseAuth supabase;
   private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
   private final SecureRandom random = new SecureRandom();
   private final Map<String,int[]> failures = new HashMap<>();
@@ -57,8 +56,8 @@ public class AuthService {
   private final Map<String,Grant> grants = new HashMap<>();
   private final Map<String,List<Map<String,Object>>> securityAlerts = new HashMap<>();
 
-  public AuthService(AppUserRepository users, AuditLog audit, Clock clock, SupabaseAuth supabase, SessionRepository sessionRepo, StateStore store) {
-    this.users = users; this.audit = audit; this.clock = clock; this.supabase = supabase; this.sessionRepo = sessionRepo; this.store = store;
+  public AuthService(AppUserRepository users, AuditLog audit, Clock clock, SessionRepository sessionRepo, StateStore store) {
+    this.users = users; this.audit = audit; this.clock = clock; this.sessionRepo = sessionRepo; this.store = store;
     retiredRefresh.putAll(store.loadMap("retired-refresh", String.class));
     store.raw("known-devices").forEach((user, json) -> knownDevices.put(user, new HashSet<>(Arrays.asList(StateStore.read(json, String[].class)))));
     store.raw("security-alerts").forEach((user, json) -> {
@@ -214,11 +213,8 @@ public class AuthService {
 
   // ------------------------------------------------------------- helpers
 
-  /** Supabase-linked accounts are checked by Supabase Auth; legacy and demo accounts by their bcrypt hash. */
-  private boolean passwordMatches(AppUser u, String password) {
-    if (u.getSupabaseId() != null && supabase.enabled()) return supabase.signIn(u.getEmail(), password);
-    return u.getSupabaseId() == null && encoder.matches(password, u.getPasswordHash());
-  }
+  /** Every account's password is checked against its bcrypt hash in the database. */
+  private boolean passwordMatches(AppUser u, String password) { return encoder.matches(password, u.getPasswordHash()); }
 
   public static int level(AppUser u) { return u.isVerified() ? 2 : 1; }
 

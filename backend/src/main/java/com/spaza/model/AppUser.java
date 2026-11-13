@@ -14,10 +14,7 @@ public class AppUser {
   @Column(nullable = false) private String businessName;
   @Column(nullable = false) private boolean verified;
   @Column(nullable = false) private Instant createdAt;
-  /** Supabase Auth user id. When set, the password lives only in Supabase and passwordHash is unusable. */
-  @Column(unique = true) private String supabaseId;
   protected AppUser() {}
   public AppUser(String id, String name, String email, String passwordHash, String role, String businessName, boolean verified) { this.id=id; this.name=name; this.email=email; this.passwordHash=passwordHash; this.role=role; this.businessName=businessName; this.verified=verified; this.createdAt=Instant.now(); }
   public String getId(){return id;} public String getName(){return name;} public String getEmail(){return email;} public String getPasswordHash(){return passwordHash;} public String getRole(){return role;} public String getBusinessName(){return businessName;} public boolean isVerified(){return verified;}
-  public String getSupabaseId(){return supabaseId;} public void setSupabaseId(String supabaseId){this.supabaseId=supabaseId;}
 }

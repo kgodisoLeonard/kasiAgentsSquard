@@ -2,7 +2,6 @@
 # Looks for .env next to this script, then in the repo root, then one folder above the repo.
 #   SUPABASE_CONNECTION  postgresql://USER:[YOUR-PASSWORD]@HOST:PORT/DB   (Supabase "Session pooler" string)
 #   password             the Supabase database password (replaces [YOUR-PASSWORD])
-#   NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY   enable Supabase Auth for new accounts
 #   OPEN_AI_KEY / GEMINI_API_KEY   Google AI Studio key used by the restock agent
 #   -LocalDb             ignore SUPABASE_CONNECTION and use the local H2 file database
 param([switch]$LocalDb)
@@ -33,10 +32,6 @@ if ($conn -and -not $LocalDb) {
 } else {
   Write-Host 'Database: local H2'
 }
-
-$sbUrl = @($vars['SUPABASE_URL'], $vars['NEXT_PUBLIC_SUPABASE_URL']) | Where-Object { $_ } | Select-Object -First 1
-$sbKey = @($vars['SUPABASE_PUBLISHABLE_KEY'], $vars['NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'], $vars['NEXT_PUBLIC_SUPABASE_ANON_KEY']) | Where-Object { $_ } | Select-Object -First 1
-if ($sbUrl -and $sbKey) { $env:SUPABASE_URL = $sbUrl; $env:SUPABASE_PUBLISHABLE_KEY = $sbKey; Write-Host 'Auth: Supabase Auth' } else { Write-Host 'Auth: local passwords (no Supabase URL/key)' }
 
 $key = if ($vars['GEMINI_API_KEY']) { $vars['GEMINI_API_KEY'] } else { $vars['OPEN_AI_KEY'] }
 if ($key) { $env:GEMINI_API_KEY = $key; Write-Host 'LLM key: loaded' } else { Write-Host 'LLM key: not set (agent runs rule-based only)' }
