@@ -81,9 +81,13 @@ public class AgentGateway {
       Map<String,Object> result = switch (action) {
         case DETECT_SHORTAGES -> detectShortages();
         case RECOMMEND_SUPPLIER -> recommend(str(p, "product"));
-        case NOTIFY -> notify(str(p, "recipientId"), str(p, "message"));
+        case NOTIFY -> notify(str(p, "recipientId").isBlank() ? onBehalfOf : str(p, "recipientId"), str(p, "message"));
         case DRAFT_GROUP_ORDER -> draft(p, onBehalfOf);
-        case EXECUTE_APPROVED_PAYMENT -> pay(str(p, "orderId"), str(p, "ownerId"));
+        case EXECUTE_APPROVED_PAYMENT -> {
+          String owner = str(p, "ownerId").isBlank() ? onBehalfOf : str(p, "ownerId");
+          if (!owner.equals(onBehalfOf)) throw new SecurityException("The agent can only pay for the owner it is working for");
+          yield pay(str(p, "orderId"), owner);
+        }
         case READ_MANDATE -> readMandate(onBehalfOf);
         case PLACE_RESTOCK_ORDER -> restock(str(p, "product"), onBehalfOf);
       };

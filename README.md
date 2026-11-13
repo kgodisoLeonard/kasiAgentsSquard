@@ -50,6 +50,21 @@ Every sign-in asks for a one-time code. No SMS provider is connected, so the cod
 
 Demo rules for Thandi: White Bread, Maize Meal (10kg) and Milk restock below 5, from Ubuntu Foods, R3,000/month budget. Sell 8 loaves of bread at the till to see it trigger.
 
+## Connecting the LLM (Google AI Studio / Gemini)
+The agent works without a model (rule-based). With a key, **Gemini decides** what to do and acts only through the agent's guarded tools, so the mandate, budget, escrow and audit rules still apply whatever the model says.
+
+1. Create a key at https://aistudio.google.com (Get API key).
+2. Start the backend with the key in the environment. Never put it in code, the frontend or git.
+
+       # PowerShell
+       $env:GEMINI_API_KEY = "<your key>"
+       $env:GEMINI_MODEL = "gemini-2.5-flash"   # optional; any Gemini model your key can use
+       cd backend; mvn spring-boot:run
+
+3. **The real case:** sell bread at the Till until fewer than 5 are left. Gemini receives the stock, the mandate limits and the open orders, decides to call `PLACE_RESTOCK_ORDER`, and the till shows its explanation. You can also use **Finance Agent → Ask the agent**.
+
+If the model errors, hits quota or does not act, the owner's restock rule is applied anyway. Limits: 5 tool steps per run and 40 runs per owner per day. Data sent to Google: stock levels, mandate limits, open order ids and supplier names; no people's names, emails, IDs or credentials.
+
 ## Demo flow (about 5 minutes)
 1. **Owner (Thandi):** open **Finance Agent**, then click **Let the agent draft a group order** for a low-stock item. The agent drafts an order for Thandi and Sipho; no money moves.
 2. In the **Agent console**, run `UPDATE_MANDATE`, `TRANSFER_FUNDS` or `READ_IDENTITY_DOCUMENTS`. Each one is refused and logged. Run `RECOMMEND_SUPPLIER` to see the prompt-injection text in Ubuntu Foods' description flagged as untrusted data.
@@ -78,6 +93,7 @@ Status key: **Real** means implemented and enforced in code, and covered by test
 | No agent or member intermediary wallet: escrow destination is fixed at creation; the ledger refuses any destination that is not a verified supplier payout address | **Real** · tested | `SimulatedXrplLedger.requireVerified` |
 | Agent allow-list (detect shortages, recommend, notify, draft order, retry an approved payment, read mandate); everything else refused and logged | **Real** · tested | `agent/AgentGateway` |
 | Untrusted text (supplier descriptions, chat) is cleaned, checked for injection patterns, flagged and never acted on; `asModelData` wraps it in delimiters for any future LLM | **Real** (pattern-based, not exhaustive) · tested | `agent/UntrustedText` |
+| LLM agent (Gemini, optional): the model can only call the guarded tools; key server-side only; minimal data sent; supplier text wrapped as untrusted; jailbroken tool calls are refused | **Real** · tested with a scripted fake model and a local Gemini-format endpoint (not yet against live Gemini) | `agent/LlmAgent`, `GeminiClient`, `LlmAgentTest` |
 | Agent has no access to identity documents, secrets or wallets | **Real** (no such references exist) · tested | `AgentGatewayTest` |
 | Append-only, hash-chained audit log (who, what, when, inputs, outputs) for agent actions, mandate checks and changes, payments, approvals, sign-ins and disputes; tamper detection | **Real** · tested | `audit/AuditLog`, `GET /api/audit/verify` |
 | Per-member approval; everyone sees the same price and split; quantity-based split that adds up exactly | **Real** · tested | `GroupOrderService.split`, `approveShare` |

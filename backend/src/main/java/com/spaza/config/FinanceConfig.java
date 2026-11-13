@@ -24,6 +24,17 @@ public class FinanceConfig {
 
   @Bean SupplierCatalog supplierCatalog() { return new SupplierCatalog(); }
 
+  /** Google AI Studio (Gemini). Key from the GEMINI_API_KEY environment variable; never committed. */
+  @Bean com.spaza.agent.ModelClient modelClient(@Value("${spaza.llm.api-key:}") String key, @Value("${spaza.llm.model:gemini-2.5-flash}") String model,
+                                                @Value("${spaza.llm.base-url:https://generativelanguage.googleapis.com/v1beta}") String baseUrl) {
+    return new com.spaza.agent.GeminiClient(key, model, baseUrl);
+  }
+
+  @Bean com.spaza.agent.LlmAgent llmAgent(com.spaza.agent.ModelClient model, AgentGateway gateway, MandateService mandates, InMemoryStore store,
+                                          GroupOrderService orders, SupplierRegistry suppliers, AuditLog audit, Clock clock) {
+    return new com.spaza.agent.LlmAgent(model, gateway, mandates::snapshot, () -> java.util.List.<Product>copyOf(store.findAll()), orders, suppliers, audit, clock);
+  }
+
   @Bean SimulatedXrplLedger ledger(Clock clock, SupplierRegistry suppliers) { return new SimulatedXrplLedger(clock, suppliers::isVerifiedPayoutAddress); }
 
   @Bean MandateService mandateService(SpendingMandateRepository repo, SupplierRegistry suppliers, AuditLog audit, Clock clock) {

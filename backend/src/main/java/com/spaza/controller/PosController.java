@@ -5,6 +5,7 @@ import com.spaza.model.SaleItem;
 import com.spaza.model.SaleRequest;
 import com.spaza.repository.InMemoryStore;
 import com.spaza.agent.AgentGateway;
+import com.spaza.agent.LlmAgent;
 import com.spaza.finance.MandateService;
 import com.spaza.security.AuthInterceptor;
 import com.spaza.security.AuthService.AuthUser;
@@ -34,7 +35,9 @@ public class PosController {
         CustomerOrder(String id, String ownerId) { this.id = id; this.ownerId = ownerId; this.openedAt = Instant.now().toString(); }
     }
 
-    public PosController(InMemoryStore store, AgentGateway agent, MandateService mandates) { this.store = store; this.agent = agent; this.mandates = mandates; }
+    private final LlmAgent llm;
+
+    public PosController(InMemoryStore store, AgentGateway agent, MandateService mandates, LlmAgent llm) { this.store = store; this.agent = agent; this.mandates = mandates; this.llm = llm; }
 
     // ------------------------------------------------------------------ customer orders (till)
 
@@ -56,18 +59,21 @@ public class PosController {
 
     /** addToOrder: takes the items off the shelf straight away, then lets the agent check the owner's restock rule. */
     @PostMapping("/orders/{id}/items")
-    public synchronized Map<String, Object> addToOrder(@PathVariable String id, @RequestBody Map<String, Object> body, HttpServletRequest req) {
+    public Map<String, Object> addToOrder(@PathVariable String id, @RequestBody Map<String, Object> body, HttpServletRequest req) {
         AuthUser u = AuthInterceptor.current(req);
-        CustomerOrder o = mine(id, u);
-        String productId = String.valueOf(body.get("productId"));
-        int qty = body.get("quantity") instanceof Number n ? n.intValue() : 1;
-        if (qty < 1) throw new IllegalArgumentException("Quantity must be at least 1");
-        Product p = store.findById(productId).orElseThrow(() -> new NoSuchElementException("Product not found"));
-        if (p.getQty() < qty) throw new IllegalStateException("Only " + p.getQty() + " " + p.getName() + " left in stock");
-        p.setQty(p.getQty() - qty);
-        o.lines.merge(productId, qty, Integer::sum);
         Map<String, Object> r = new LinkedHashMap<>();
-        r.put("success", true); r.put("order", view(o)); r.put("item", p);
+        Product p;
+        synchronized (this) {
+            CustomerOrder o = mine(id, u);
+            String productId = String.valueOf(body.get("productId"));
+            int qty = body.get("quantity") instanceof Number n ? n.intValue() : 1;
+            if (qty < 1) throw new IllegalArgumentException("Quantity must be at least 1");
+            p = store.findById(productId).orElseThrow(() -> new NoSuchElementException("Product not found"));
+            if (p.getQty() < qty) throw new IllegalStateException("Only " + p.getQty() + " " + p.getName() + " left in stock");
+            p.setQty(p.getQty() - qty);
+            o.lines.merge(productId, qty, Integer::sum);
+            r.put("success", true); r.put("order", view(o)); r.put("item", p);
+        }
         restockCheck(u.id(), p).ifPresent(x -> r.put("restock", x));
         return r;
     }
@@ -131,8 +137,30 @@ public class PosController {
 
     /** Calls the agent only when the owner has a restock rule for this product and stock has dropped below its level. */
     private Optional<Map<String, Object>> restockCheck(String ownerId, Product p) {
-        return mandates.restockRules(ownerId).stream().filter(r -> r.product().equalsIgnoreCase(p.getName()) && p.getQty() < r.reorderBelow()).findFirst()
-            .map(r -> agent.execute("PLACE_RESTOCK_ORDER", Map.of("product", p.getName()), ownerId));
+        Optional<MandateService.RestockRule> rule = mandates.restockRules(ownerId).stream().filter(r -> r.product().equalsIgnoreCase(p.getName()) && p.getQty() < r.reorderBelow()).findFirst();
+        if (rule.isEmpty()) return Optional.empty();
+        if (!llm.configured()) return Optional.of(agent.execute("PLACE_RESTOCK_ORDER", Map.of("product", p.getName()), ownerId));
+        // The LLM decides and acts through the same guarded tools. If it fails or does not act, the owner's rule still applies.
+        Map<String, Object> run;
+        try {
+            run = llm.run(ownerId, "A till sale just took '" + p.getName() + "' down to " + p.getQty() + " in stock, below the owner's restock level of "
+                + rule.get().reorderBelow() + ". Check the situation and restock according to the owner's mandate.", "till");
+        } catch (RuntimeException e) {
+            run = Map.of("error", String.valueOf(e.getMessage()), "steps", List.of());
+        }
+        Map<String, Object> placed = null;
+        if (run.get("steps") instanceof List<?> steps) for (Object o : steps) if (o instanceof Map<?, ?> step && "PLACE_RESTOCK_ORDER".equals(String.valueOf(step.get("tool")).toUpperCase(Locale.ROOT))) {
+            @SuppressWarnings("unchecked") Map<String, Object> res = (Map<String, Object>) step.get("result");
+            placed = res;
+        }
+        boolean fallback = placed == null;
+        Map<String, Object> result = new LinkedHashMap<>(fallback ? agent.execute("PLACE_RESTOCK_ORDER", Map.of("product", p.getName()), ownerId) : placed);
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("model", run.getOrDefault("model", "")); info.put("answer", run.get("answer")); info.put("error", run.get("error"));
+        info.put("tools", run.get("steps") instanceof List<?> l ? l.stream().map(x -> ((Map<?, ?>) x).get("tool")).toList() : List.of());
+        info.put("fallbackToRule", fallback);
+        result.put("llm", info);
+        return Optional.of(result);
     }
 
     @GetMapping("/inventory")
@@ -181,7 +209,16 @@ public class PosController {
     }
 
     @PostMapping("/sale")
-    public synchronized ResponseEntity<?> sale(@RequestBody SaleRequest req, HttpServletRequest httpReq) {
+    public ResponseEntity<?> sale(@RequestBody SaleRequest req, HttpServletRequest httpReq) {
+        String ownerId = AuthInterceptor.current(httpReq).id();
+        ResponseEntity<?> recorded = recordSale(req);
+        if (!recorded.getStatusCode().is2xxSuccessful()) return recorded;
+        List<Map<String, Object>> restock = new ArrayList<>();
+        for (SaleItem si : req.getItems()) store.findById(si.getProductId()).flatMap(p -> restockCheck(ownerId, p)).ifPresent(restock::add);
+        return ResponseEntity.ok(Map.of("success", true, "sale", ((Map<?, ?>) recorded.getBody()).get("sale"), "restock", restock));
+    }
+
+    private synchronized ResponseEntity<?> recordSale(SaleRequest req) {
         if (req.getItems() == null || req.getItems().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Cart is empty"));
         }
@@ -229,14 +266,11 @@ public class PosController {
         sale.put("changeDue", change);
         sales.add(sale);
 
-        List<Map<String, Object>> restock = new ArrayList<>();
-        String ownerId = AuthInterceptor.current(httpReq).id();
-        for (SaleItem si : req.getItems()) store.findById(si.getProductId()).flatMap(p -> restockCheck(ownerId, p)).ifPresent(restock::add);
-        return ResponseEntity.ok(Map.of("success", true, "sale", sale, "restock", restock));
+        return ResponseEntity.ok(Map.of("success", true, "sale", sale));
     }
 
     @PostMapping("/restock-check")
-    public synchronized Map<String, Object> restockCheckAll(HttpServletRequest req) {
+    public Map<String, Object> restockCheckAll(HttpServletRequest req) {
         String ownerId = AuthInterceptor.current(req).id();
         List<Map<String, Object>> results = new ArrayList<>();
         for (Product p : store.findAll()) restockCheck(ownerId, p).ifPresent(results::add);

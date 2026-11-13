@@ -98,7 +98,9 @@ export async function renderPOS(root, api, alive) {
     else if (res.status === 'ESCALATED') text = `🤖 ${res.reason}`;
     else if (res.code === 'ORDER_ALREADY_OPEN') text = `🤖 ${res.product}: restock order ${res.orderId} is already open`;
     else return;
-    $('#agent-log').insertAdjacentHTML('afterbegin', `<div class="sim-note" style="margin-top:0">${esc(text)}</div>`);
+    const why = r.llm ? (r.llm.error ? `<br><small>LLM unavailable (${esc(r.llm.error)}); your restock rule was applied.</small>`
+      : `<br><small><b>${esc(r.llm.model)}:</b> ${esc(r.llm.answer || '')}${r.llm.fallbackToRule ? ' (the model did not order, so your restock rule was applied)' : ''}</small>`) : '';
+    $('#agent-log').insertAdjacentHTML('afterbegin', `<div class="sim-note" style="margin-top:0">${esc(text)}${why}</div>`);
     if (res.status === 'ORDERED' || res.status === 'BLOCKED' || res.status === 'ESCALATED') toast(text.replace('🤖 ', ''), res.status === 'ORDERED' ? 'success' : 'error');
   }
 

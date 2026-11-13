@@ -12,13 +12,21 @@ const CONSOLE_PRESETS = {
 };
 
 export async function renderAgent(root, api, alive) {
-  const [scan, rules] = await Promise.all([api.shortages(), api.agentRules()]);
+  const [scan, rules, llmData] = await Promise.all([api.shortages(), api.agentRules(), api.llmStatus()]);
+  const llm = llmData.llm;
   if (!alive()) return;
 
   root.innerHTML = `
     <div class="hero"><span class="chip violet">🤖 Spaza Finance Agent</span>
       <h3>${scan.recommendations.length} item${scan.recommendations.length === 1 ? '' : 's'} at or below your warning level</h3>
       <p>${esc(scan.note)}</p></div>
+    <div class="card" style="margin-top:20px"><div class="card-head"><div><h3>Ask the agent ${llm.configured ? `(${esc(llm.model)})` : ''}</h3>
+        <p class="sub">${llm.configured ? `${esc(llm.provider)} decides; it can only act through the guarded tools below, and every step is logged.` : `No AI model connected yet. ${esc(llm.howToEnable)} Until then the rule-based agent handles restocking.`}</p></div>
+        <span class="chip ${llm.configured ? 'green' : 'amber'}">${llm.configured ? 'LLM connected' : 'LLM off'}</span></div>
+      <form id="llm-form" class="stack"><div class="field"><label for="llm-msg">What should the agent do?</label>
+        <textarea id="llm-msg" class="input" rows="2" maxlength="1000" ${llm.configured ? '' : 'disabled'}>Check my stock and restock anything that is below my restock levels.</textarea></div>
+        <button class="btn btn-primary" type="submit" ${llm.configured ? '' : 'disabled'}>Ask the agent</button></form>
+      <div id="llm-result" aria-live="polite"></div></div>
     <div class="grid g-2" style="margin-top:20px" id="recs"></div>
     <div class="grid g-2" style="margin-top:20px">
       <div class="card"><h3>Agent console</h3><p class="sub">Send the agent an action. Only allow-listed actions run; everything else is refused and logged.</p>
@@ -54,6 +62,18 @@ export async function renderAgent(root, api, alive) {
       toast(`Agent drafted ${r.result.orderId}. Approve your share under Group Orders.`);
       location.hash = 'orders';
     } catch (err) { toast(err.message, 'error'); b.disabled = false; }
+  });
+
+  $('#llm-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const b = e.target.querySelector('button'); b.disabled = true; b.textContent = 'Thinking…';
+    try {
+      const { run } = await api.llmRun($('#llm-msg').value.trim());
+      $('#llm-result').innerHTML = `<div class="sim-note"><b>${esc(run.model)}:</b> ${esc(run.error ? 'Error: ' + run.error : run.answer || '')}</div>
+        ${run.steps.map((s) => `<div class="row" style="font-size:13px;margin-top:8px"><span>🔧 ${esc(s.tool)} <small class="mono">${esc(JSON.stringify(s.args))}</small></span>
+          <span class="chip ${s.result.allowed ? 'green' : 'rose'}">${s.result.allowed ? esc(String(s.result.result?.status || 'done').toLowerCase()) : 'blocked'}</span></div>`).join('')}`;
+    } catch (err) { toast(err.message, 'error'); }
+    finally { b.disabled = false; b.textContent = 'Ask the agent'; }
   });
 
   const setPreset = () => { $('#ag-params').value = JSON.stringify(CONSOLE_PRESETS[$('#ag-action').value], null, 2); };

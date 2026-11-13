@@ -1,6 +1,7 @@
 package com.spaza.controller;
 
 import com.spaza.agent.AgentGateway;
+import com.spaza.agent.LlmAgent;
 import com.spaza.finance.GroupOrderService;
 import com.spaza.model.Product;
 import com.spaza.repository.AgentPolicy;
@@ -24,10 +25,22 @@ import java.util.*;
 @RequireRole("OWNER")
 public class AgentController {
   private final InMemoryStore store; private final AgentPolicy policy; private final PlatformController platform;
-  private final AgentGateway agent; private final GroupOrderService orders; private final AppUserRepository users;
+  private final AgentGateway agent; private final GroupOrderService orders; private final AppUserRepository users; private final LlmAgent llm;
 
-  public AgentController(InMemoryStore store, AgentPolicy policy, PlatformController platform, AgentGateway agent, GroupOrderService orders, AppUserRepository users) {
-    this.store = store; this.policy = policy; this.platform = platform; this.agent = agent; this.orders = orders; this.users = users;
+  public AgentController(InMemoryStore store, AgentPolicy policy, PlatformController platform, AgentGateway agent, GroupOrderService orders, AppUserRepository users, LlmAgent llm) {
+    this.store = store; this.policy = policy; this.platform = platform; this.agent = agent; this.orders = orders; this.users = users; this.llm = llm;
+  }
+
+  @GetMapping("/llm")
+  public Map<String,Object> llmStatus() { return Map.of("success", true, "llm", llm.status()); }
+
+  /** The owner asks the LLM agent to do something. It can only act through the guarded agent tools. */
+  @PostMapping("/llm/run")
+  public Map<String,Object> llmRun(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+    String message = String.valueOf(body.getOrDefault("message", "")).trim();
+    if (message.isEmpty()) throw new IllegalArgumentException("Tell the agent what to do");
+    if (message.length() > 1000) throw new IllegalArgumentException("Keep the request under 1000 characters");
+    return Map.of("success", true, "run", llm.run(AuthInterceptor.current(req).id(), message, "owner-request"));
   }
 
   @GetMapping("/rules")
