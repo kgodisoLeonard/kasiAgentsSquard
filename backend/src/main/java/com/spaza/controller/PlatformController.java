@@ -2,9 +2,11 @@ package com.spaza.controller;
 
 import com.spaza.model.Product;
 import com.spaza.model.AppUser;
+import com.spaza.model.OwnerSupplier;
 import com.spaza.model.SupplierRating;
 import com.spaza.repository.AppUserRepository;
 import com.spaza.repository.InMemoryStore;
+import com.spaza.repository.OwnerSupplierRepository;
 import com.spaza.repository.SupplierRatingRepository;
 import org.springframework.web.bind.annotation.*;
 import java.time.*;
@@ -24,8 +26,10 @@ public class PlatformController {
   )));
   private final List<Map<String,Object>> orders = Collections.synchronizedList(new ArrayList<>());
 
-  public PlatformController(InMemoryStore store, AppUserRepository users, SupplierRatingRepository ratings) {
-    this.store = store; this.users = users; this.ratings = ratings;
+  private final OwnerSupplierRepository ownerSuppliers;
+
+  public PlatformController(InMemoryStore store, AppUserRepository users, SupplierRatingRepository ratings, OwnerSupplierRepository ownerSuppliers) {
+    this.store = store; this.users = users; this.ratings = ratings; this.ownerSuppliers = ownerSuppliers;
     Map<String,Object> initial=order("ORD-2026-0412", "Mokoena Meats", "Minced Meat", 20, 65.0, "SUPPLIER_REVIEW", "Thandi Mokone"); initial.put("createdBy","Spaza Finance Agent"); initial.put("reason","Low-stock group-buy recommendation"); orders.add(initial);
   }
 
@@ -37,13 +41,47 @@ public class PlatformController {
   }
   @GetMapping("/suppliers") public Map<String,Object> suppliers() { return Map.of("success",true,"suppliers",suppliers); }
   @GetMapping("/directory") public Map<String,Object> directory() {
+    List<Map<String,Object>> spazaDirectory = users.findAll().stream().filter(u -> "OWNER".equals(u.getRole())).map(this::spazaView).toList();
+    return Map.of("success",true,"suppliers",supplierDirectory(),"spazas",spazaDirectory);
+  }
+  private List<Map<String,Object>> supplierDirectory() {
     List<Map<String,Object>> supplierDirectory = new ArrayList<>();
-    suppliers.forEach(s -> supplierDirectory.add(supplierView(String.valueOf(s.get("id")), String.valueOf(s.get("name")), String.valueOf(s.getOrDefault("country", "South Africa")), true, s)));
+    new ArrayList<>(suppliers).forEach(s -> supplierDirectory.add(supplierView(String.valueOf(s.get("id")), String.valueOf(s.get("name")), String.valueOf(s.getOrDefault("country", "South Africa")), true, s)));
     users.findAll().stream().filter(u -> "SUPPLIER".equals(u.getRole())).forEach(u -> {
       if (supplierDirectory.stream().noneMatch(s -> String.valueOf(s.get("businessName")).equalsIgnoreCase(u.getBusinessName()))) supplierDirectory.add(supplierView(u.getId(), u.getBusinessName(), "South Africa", u.isVerified(), Map.of()));
     });
-    List<Map<String,Object>> spazaDirectory = users.findAll().stream().filter(u -> "OWNER".equals(u.getRole())).map(this::spazaView).toList();
-    return Map.of("success",true,"suppliers",supplierDirectory,"spazas",spazaDirectory);
+    return supplierDirectory;
+  }
+
+  /** The supplier stores an owner has chosen to work with. Entries whose supplier no longer exists are skipped. */
+  @GetMapping("/owners/{ownerId}/suppliers") public Map<String,Object> ownerSuppliers(@PathVariable String ownerId) {
+    requireOwner(ownerId);
+    return Map.of("success",true,"suppliers",ownerSupplierViews(ownerId));
+  }
+  @PostMapping("/owners/{ownerId}/suppliers") public synchronized Map<String,Object> addOwnerSupplier(@PathVariable String ownerId, @RequestBody Map<String,Object> input) {
+    requireOwner(ownerId);
+    Object raw=input.get("supplierId");
+    String supplierId=raw == null ? "" : String.valueOf(raw).trim();
+    if (supplierId.isEmpty()) throw new IllegalArgumentException("Choose a supplier store to add");
+    Map<String,Object> supplier=supplierDirectory().stream().filter(s -> supplierId.equals(s.get("id"))).findFirst().orElseThrow(() -> new NoSuchElementException("Supplier store not found"));
+    if (ownerSuppliers.findByOwnerIdAndSupplierId(ownerId, supplierId).isPresent()) throw new IllegalStateException(supplier.get("businessName")+" is already in your suppliers");
+    ownerSuppliers.save(new OwnerSupplier(UUID.randomUUID().toString(), ownerId, supplierId, String.valueOf(supplier.get("businessName"))));
+    return Map.of("success",true,"suppliers",ownerSupplierViews(ownerId),"message",supplier.get("businessName")+" added to your suppliers");
+  }
+  @DeleteMapping("/owners/{ownerId}/suppliers/{supplierId}") public synchronized Map<String,Object> removeOwnerSupplier(@PathVariable String ownerId, @PathVariable String supplierId) {
+    requireOwner(ownerId);
+    OwnerSupplier entry=ownerSuppliers.findByOwnerIdAndSupplierId(ownerId, supplierId).orElseThrow(() -> new NoSuchElementException("That supplier is not in your list"));
+    ownerSuppliers.delete(entry);
+    return Map.of("success",true,"suppliers",ownerSupplierViews(ownerId),"message",entry.getSupplierName()+" removed from your suppliers");
+  }
+  private void requireOwner(String ownerId) {
+    AppUser owner=users.findById(ownerId).orElseThrow(() -> new NoSuchElementException("Owner account not found. Please sign in again."));
+    if (!"OWNER".equals(owner.getRole())) throw new IllegalArgumentException("Only spaza owners can manage a supplier list");
+  }
+  private List<Map<String,Object>> ownerSupplierViews(String ownerId) {
+    Map<String,Map<String,Object>> byId=new HashMap<>();
+    supplierDirectory().forEach(s -> byId.put(String.valueOf(s.get("id")), s));
+    return ownerSuppliers.findByOwnerIdOrderByAddedAtAsc(ownerId).stream().map(e -> byId.get(e.getSupplierId())).filter(Objects::nonNull).toList();
   }
   @PostMapping("/suppliers/{supplierId}/ratings") public synchronized Map<String,Object> rateSupplier(@PathVariable String supplierId, @RequestBody Map<String,Object> input) {
     String orderId=String.valueOf(input.getOrDefault("orderId", ""));

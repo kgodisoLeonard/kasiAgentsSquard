@@ -15,9 +15,13 @@ import { renderMarketplace } from './pages/marketplace.js';
 let user = null;
 applyTheme();
 try { user = JSON.parse(localStorage.getItem('spaza_user') || 'null'); }
-catch { localStorage.removeItem('spaza_user'); }
+catch { user = null; }
+// Discard corrupted or outdated saved sessions instead of rendering a broken app.
+if (user && (typeof user !== 'object' || !user.id || !['OWNER', 'SUPPLIER'].includes(user.role))) user = null;
+if (!user) localStorage.removeItem('spaza_user');
+const firstName = String(user?.name || '').trim().split(/\s+/)[0];
 const ownerRoutes = {
-  dashboard: { label: 'Dashboard', title: 'Good day, Thandi 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
+  dashboard: { label: 'Dashboard', title: firstName ? `Good day, ${firstName} 👋` : 'Good day 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
   marketplace: { label: 'Marketplace', title: 'Supplier Marketplace', sub: 'Choose verified products and place stock orders.', render: renderMarketplace },
   agent: { label: 'Group Buys', title: 'AI Group Buying', sub: 'Your agent spots shortages and pools orders with nearby shops.', render: renderAgent },
   wallet: { label: 'Wallet', title: 'RLUSD Wallet', sub: 'Send stablecoin payments on the XRPL Testnet.', render: renderWallet },

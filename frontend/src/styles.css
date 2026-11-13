@@ -230,6 +230,13 @@ input, select { font: inherit; }
 .rating-stars { margin-top: 9px; color: #d98b13; letter-spacing: .06em; }
 .rating-stars small { color: var(--muted); letter-spacing: 0; }
 .order-row { gap: 12px; }
+.market-side { display: grid; gap: 20px; align-self: start; min-width: 0; }
+.add-supplier { display: flex; gap: 8px; margin-bottom: 14px; }
+.add-supplier .input { flex: 1; min-width: 0; }
+.my-supplier { gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
+.my-supplier:first-child { border-top: 0; padding-top: 0; }
+.my-supplier small { color: var(--muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .order-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .stock-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .stock-item { display: flex; align-items: center; gap: 10px; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
