@@ -23,7 +23,7 @@ public class GeminiClient implements ModelClient {
 
   public GeminiClient(String apiKey, String model, String baseUrl) {
     this.apiKey = apiKey == null ? "" : apiKey.trim();
-    this.model = model == null || model.isBlank() ? "gemini-2.5-flash" : model.trim();
+    this.model = model == null || model.isBlank() ? "gemini-flash-latest" : model.trim();
     this.baseUrl = baseUrl == null || baseUrl.isBlank() ? "https://generativelanguage.googleapis.com/v1beta" : baseUrl.trim().replaceAll("/+$", "");
   }
 

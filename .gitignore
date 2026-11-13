@@ -21,3 +21,6 @@ data/
 
 *.seed
 wallet-seeds.json
+
+logs/
+*.log

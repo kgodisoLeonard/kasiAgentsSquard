@@ -58,7 +58,7 @@ The agent works without a model (rule-based). With a key, **Gemini decides** wha
 
        # PowerShell
        $env:GEMINI_API_KEY = "<your key>"
-       $env:GEMINI_MODEL = "gemini-2.5-flash"   # optional; any Gemini model your key can use
+       $env:GEMINI_MODEL = "gemini-flash-latest"   # optional; any Gemini model your key can use
        cd backend; mvn spring-boot:run
 
 3. **The real case:** sell bread at the Till until fewer than 5 are left. Gemini receives the stock, the mandate limits and the open orders, decides to call `PLACE_RESTOCK_ORDER`, and the till shows its explanation. You can also use **Finance Agent → Ask the agent**.

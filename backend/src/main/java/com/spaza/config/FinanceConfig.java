@@ -25,7 +25,7 @@ public class FinanceConfig {
   @Bean SupplierCatalog supplierCatalog() { return new SupplierCatalog(); }
 
   /** Google AI Studio (Gemini). Key from the GEMINI_API_KEY environment variable; never committed. */
-  @Bean com.spaza.agent.ModelClient modelClient(@Value("${spaza.llm.api-key:}") String key, @Value("${spaza.llm.model:gemini-2.5-flash}") String model,
+  @Bean com.spaza.agent.ModelClient modelClient(@Value("${spaza.llm.api-key:}") String key, @Value("${spaza.llm.model:gemini-flash-latest}") String model,
                                                 @Value("${spaza.llm.base-url:https://generativelanguage.googleapis.com/v1beta}") String baseUrl) {
     return new com.spaza.agent.GeminiClient(key, model, baseUrl);
   }

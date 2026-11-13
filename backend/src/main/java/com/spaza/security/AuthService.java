@@ -39,6 +39,7 @@ public class AuthService {
   private final AppUserRepository users;
   private final AuditLog audit;
   private final Clock clock;
+  private final SupabaseAuth supabase;
   private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
   private final SecureRandom random = new SecureRandom();
   private final Map<String,int[]> failures = new HashMap<>();
@@ -50,7 +51,7 @@ public class AuthService {
   private final Map<String,Grant> grants = new HashMap<>();
   private final Map<String,List<Map<String,Object>>> securityAlerts = new HashMap<>();
 
-  public AuthService(AppUserRepository users, AuditLog audit, Clock clock) { this.users = users; this.audit = audit; this.clock = clock; }
+  public AuthService(AppUserRepository users, AuditLog audit, Clock clock, SupabaseAuth supabase) { this.users = users; this.audit = audit; this.clock = clock; this.supabase = supabase; }
 
   // ------------------------------------------------------------- login + MFA
 
@@ -64,7 +65,7 @@ public class AuthService {
       throw new AuthException(429, "Too many failed sign-in attempts. Try again in " + mins + " minute" + (mins == 1 ? "" : "s") + ".");
     }
     Optional<AppUser> user = users.findByBusinessNameIgnoreCase(businessName.trim()).stream()
-        .filter(u -> encoder.matches(password, u.getPasswordHash())).findFirst();
+        .filter(u -> passwordMatches(u, password)).findFirst();
     if (user.isEmpty()) {
       int count = ++failures.computeIfAbsent(key, k -> new int[1])[0];
       audit.record(ActorType.HUMAN, key, "LOGIN_FAILED", Map.of("ip", ip, "failures", count), Map.of());
@@ -175,6 +176,12 @@ public class AuthService {
   }
 
   // ------------------------------------------------------------- helpers
+
+  /** Supabase-linked accounts are checked by Supabase Auth; legacy and demo accounts by their bcrypt hash. */
+  private boolean passwordMatches(AppUser u, String password) {
+    if (u.getSupabaseId() != null && supabase.enabled()) return supabase.signIn(u.getEmail(), password);
+    return u.getSupabaseId() == null && encoder.matches(password, u.getPasswordHash());
+  }
 
   public static int level(AppUser u) { return u.isVerified() ? 2 : 1; }
 

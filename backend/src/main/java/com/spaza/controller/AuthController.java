@@ -8,6 +8,7 @@ import com.spaza.security.AuthInterceptor;
 import com.spaza.security.AuthService;
 import com.spaza.security.AuthService.AuthUser;
 import com.spaza.security.PasswordPolicy;
+import com.spaza.security.SupabaseAuth;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
@@ -26,9 +27,10 @@ public class AuthController {
   private final AppUserRepository users;
   private final AuthService auth;
   private final AuditLog audit;
+  private final SupabaseAuth supabase;
   private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-  public AuthController(AppUserRepository users, AuthService auth, AuditLog audit) { this.users = users; this.auth = auth; this.audit = audit; }
+  public AuthController(AppUserRepository users, AuthService auth, AuditLog audit, SupabaseAuth supabase) { this.users = users; this.auth = auth; this.audit = audit; this.supabase = supabase; }
 
   /** Step 1: password check. Returns a one-time-code challenge (MFA is mandatory). */
   @PostMapping("/login") public ResponseEntity<?> login(@RequestBody(required = false) Map<String,Object> body, HttpServletRequest req) {
@@ -60,9 +62,21 @@ public class AuthController {
     if (users.existsByBusinessNameIgnoreCase(business)) return error(409, "That business name is already registered. Sign in, or use a different name.");
     try {
       // New accounts start at Level 1 (unverified). Orders and payouts need Level 2 verification.
-      AppUser user = users.saveAndFlush(new AppUser(UUID.randomUUID().toString(), name, email, encoder.encode(password), role, business, false));
-      audit.record(ActorType.HUMAN, user.getId(), "ACCOUNT_REGISTERED", Map.of("role", role), Map.of("level", 1));
-      return ResponseEntity.status(201).body(Map.of("success", true, "user", AuthService.userView(user), "next", "Sign in to finish setting up your account."));
+      String supabaseId = null, next = "Sign in to finish setting up your account.";
+      boolean confirm = false;
+      String hash = encoder.encode(password);
+      if (supabase.enabled()) {
+        // The password is stored by Supabase Auth only; the local hash is of a random value nobody knows.
+        SupabaseAuth.SignUp signUp = supabase.signUp(email, password, Map.of("name", name, "business_name", business, "role", role));
+        supabaseId = signUp.userId(); confirm = signUp.confirmationRequired();
+        hash = encoder.encode(UUID.randomUUID().toString());
+        if (confirm) next = "We sent a confirmation link to " + email + ". Open it, then sign in with your business name and password.";
+      }
+      AppUser fresh = new AppUser(UUID.randomUUID().toString(), name, email, hash, role, business, false);
+      fresh.setSupabaseId(supabaseId);
+      AppUser user = users.saveAndFlush(fresh);
+      audit.record(ActorType.HUMAN, user.getId(), "ACCOUNT_REGISTERED", Map.of("role", role, "auth", supabaseId == null ? "local" : "supabase"), Map.of("level", 1));
+      return ResponseEntity.status(201).body(Map.of("success", true, "user", AuthService.userView(user), "confirmEmail", confirm, "next", next));
     } catch (DataIntegrityViolationException e) {
       return error(409, "An account with this email already exists");
     }
