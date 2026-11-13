@@ -2,6 +2,8 @@ target/
 *.class
 *.jar
 .mvn/
+backend/.m2/
+backend/usdc-testnet.properties
 mvnw
 mvnw.cmd
 

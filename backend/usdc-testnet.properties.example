@@ -1,0 +1,3 @@
+# Copy to usdc-testnet.properties for a local Testnet wallet. Never put a mainnet seed in source control.
+usdc.merchant.address=rYourTestnetMerchantAddress
+usdc.merchant.seed=sYourTestnetSeed

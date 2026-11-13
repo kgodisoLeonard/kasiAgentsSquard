@@ -4,6 +4,7 @@ import com.spaza.model.Product;
 import com.spaza.model.SaleItem;
 import com.spaza.model.SaleRequest;
 import com.spaza.repository.InMemoryStore;
+import com.spaza.service.UsdcInvoiceService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,9 +16,13 @@ import java.util.*;
 public class PosController {
 
     private final InMemoryStore store;
+    private final UsdcInvoiceService usdcInvoices;
     private final List<Map<String, Object>> sales = Collections.synchronizedList(new ArrayList<>());
 
-    public PosController(InMemoryStore store) { this.store = store; }
+    public PosController(InMemoryStore store, UsdcInvoiceService usdcInvoices) {
+        this.store = store;
+        this.usdcInvoices = usdcInvoices;
+    }
 
     @GetMapping("/inventory")
     public Map<String, Object> inventory() {
@@ -70,6 +75,12 @@ public class PosController {
             return ResponseEntity.badRequest().body(Map.of("error", "Cart is empty"));
         }
 
+        if ("usdc".equalsIgnoreCase(req.getPaymentMethod())) {
+            Map<String, Object> invoiceCheck = usdcInvoices.consumeVerifiedInvoice(req.getUsdcInvoiceId(), req.getItems(), store);
+            if (!(Boolean) invoiceCheck.get("allowed")) {
+                return ResponseEntity.status(422).body(Map.of("error", invoiceCheck.get("reason")));
+            }
+        }
         // Validate everything first so a failed sale never partially deducts stock
         for (SaleItem si : req.getItems()) {
             Optional<Product> op = store.findById(si.getProductId());

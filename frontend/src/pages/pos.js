@@ -31,7 +31,7 @@ export async function renderPOS(root, api, alive) {
         <div class="divider"></div>
         <div class="row total-row"><span>Total</span><span class="v" id="total">R0.00</span></div>
         <div class="segmented" id="methods" style="margin-top:16px">
-          <button data-m="cash" class="active">💵 Cash</button><button data-m="card">💳 Card</button><button data-m="rlusd">🪙 RLUSD</button>
+          <button data-m="cash" class="active">💵 Cash</button><button data-m="card">💳 Card</button><button data-m="usdc">💵 USDC</button>
         </div>
         <div id="cash-box" style="margin-top:12px">
           <div class="field"><label for="cash">Cash tendered</label><input id="cash" type="number" min="0" step="0.5" class="input" placeholder="0.00"/></div>
@@ -124,7 +124,19 @@ export async function renderPOS(root, api, alive) {
     if (method === 'cash' && tendered < sub) return toast(`Cash tendered is short by ${money(sub - tendered)}`, 'error');
     const btn = $('#complete'); btn.disabled = true; btn.textContent = 'Processing…';
     try {
-      const res = await api.sale({ items: [...cart].map(([productId, quantity]) => ({ productId, quantity })), paymentMethod: method, cashTendered: tendered });
+      const items = [...cart].map(([productId, quantity]) => ({ productId, quantity }));
+      if (method === 'usdc') {
+        const invoice = await api.createUsdcInvoice({ items });
+        btn.disabled = false; btn.textContent = 'Complete sale';
+        return openUsdcPaymentModal(api, invoice, async (verifiedInvoice) => {
+          const res = await api.sale({ items, paymentMethod: 'usdc', usdcInvoiceId: verifiedInvoice.id });
+          toast(`${res.sale.saleId} paid with USDC · ${money(res.sale.subtotal)}`);
+          cart.clear(); $('#cash').value = '';
+          inventory = (await api.inventory()).inventory;
+          drawCart();
+        });
+      }
+      const res = await api.sale({ items, paymentMethod: method, cashTendered: tendered });
       toast(`${res.sale.saleId} done · ${money(res.sale.subtotal)}${res.sale.changeDue ? ' · change ' + money(res.sale.changeDue) : ''}`);
       cart.clear(); $('#cash').value = '';
       inventory = (await api.inventory()).inventory;
@@ -138,6 +150,40 @@ export async function renderPOS(root, api, alive) {
   }));
 
   drawCart();
+}
+
+function openUsdcPaymentModal(api, invoice, onPaid) {
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg';
+  bg.innerHTML = `
+    <form class="modal stack" id="usdc-payment-form">
+      <div><h3 style="font-size:19px">Pay with USDC</h3><p class="sub" style="margin:4px 0 0">Send the exact amount on XRPL, then paste the transaction hash to settle this sale.</p></div>
+      <div class="card" style="background:var(--surface);padding:14px">
+        <div class="row"><span class="k">Amount</span><b class="mono">${esc(invoice.amount)} USDC</b></div>
+        <div class="row" style="margin-top:8px"><span class="k">Invoice</span><span class="mono">${esc(invoice.id)}</span></div>
+        <div class="field" style="margin-top:12px"><label>Merchant XRPL address</label><input class="input mono" readonly value="${esc(invoice.merchantAddress)}"></div>
+        <div class="field"><label>Official USDC issuer</label><input class="input mono" readonly value="${esc(invoice.issuer)}"></div>
+        <div class="field"><label>Payment request</label><textarea class="input mono" readonly rows="3">${esc(invoice.paymentUri)}</textarea></div>
+        <p class="sub" style="margin:0">Expires ${new Date(invoice.expiresAt).toLocaleTimeString('en-ZA')}. Send only USDC on this XRPL network.</p>
+      </div>
+      <div class="field"><label for="usdc-hash">Validated XRPL transaction hash</label><input id="usdc-hash" class="input mono" required minlength="64" maxlength="64" placeholder="64-character transaction hash" autocomplete="off"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end"><button type="button" class="btn btn-ghost" id="cancel-usdc">Cancel</button><button type="submit" class="btn btn-primary" id="verify-usdc">Verify payment</button></div>
+    </form>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.addEventListener('click', (event) => { if (event.target === bg) close(); });
+  bg.querySelector('#cancel-usdc').onclick = close;
+  bg.querySelector('form').onsubmit = async (event) => {
+    event.preventDefault();
+    const button = bg.querySelector('#verify-usdc');
+    button.disabled = true; button.textContent = 'Verifying…';
+    try {
+      const paid = await api.verifyUsdcInvoice(invoice.id, bg.querySelector('#usdc-hash').value.trim());
+      close(); await onPaid(paid);
+    } catch (err) { toast(err.message, 'error'); }
+    finally { button.disabled = false; button.textContent = 'Verify payment'; }
+  };
+  bg.querySelector('#usdc-hash').focus();
 }
 
 function openProductModal(api, onSaved) {
