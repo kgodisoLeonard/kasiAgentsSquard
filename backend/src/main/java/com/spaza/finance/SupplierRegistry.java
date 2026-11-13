@@ -2,6 +2,7 @@ package com.spaza.finance;
 
 import com.spaza.audit.AuditLog;
 import com.spaza.model.AppUser;
+import com.spaza.persistence.StateStore;
 
 import java.util.*;
 import java.util.function.Supplier;
@@ -33,8 +34,15 @@ public class SupplierRegistry {
 
   private final Supplier<List<AppUser>> users;
   private final Map<String,Integer> extraDeliveries = new HashMap<>();
+  private final StateStore store;
 
-  public SupplierRegistry(Supplier<List<AppUser>> users) { this.users = users; }
+  public SupplierRegistry(Supplier<List<AppUser>> users) { this(users, StateStore.memory()); }
+
+  /** Completed-delivery counts (which lift suppliers off trial) are stored, so a restart keeps each supplier's record. */
+  public SupplierRegistry(Supplier<List<AppUser>> users, StateStore store) {
+    this.users = users; this.store = store;
+    extraDeliveries.putAll(store.loadMap("supplier-deliveries", Integer.class));
+  }
 
   public synchronized List<SupplierInfo> all() {
     List<AppUser> accounts = users.get();
@@ -65,7 +73,9 @@ public class SupplierRegistry {
     return all().stream().anyMatch(s -> s.canReceiveOrders() && s.payoutAddress().equals(address));
   }
 
-  public synchronized void recordCompletedDelivery(String supplierId) { extraDeliveries.merge(supplierId, 1, Integer::sum); }
+  public synchronized void recordCompletedDelivery(String supplierId) {
+    store.save("supplier-deliveries", supplierId, extraDeliveries.merge(supplierId, 1, Integer::sum));
+  }
 
   private SupplierInfo info(String id, String name, String accountUserId, boolean verified, int deliveries, String description) {
     boolean hit = SIMULATED_WATCH_LIST.stream().anyMatch(w -> name.toLowerCase(Locale.ROOT).contains(w));

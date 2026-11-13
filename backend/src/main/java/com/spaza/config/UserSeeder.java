@@ -1,6 +1,7 @@
 package com.spaza.config;
 
 import com.spaza.finance.MandateService;
+import com.spaza.inventory.InventoryService;
 import com.spaza.model.AppUser;
 import com.spaza.repository.AppUserRepository;
 import org.springframework.boot.CommandLineRunner;
@@ -23,7 +24,7 @@ public class UserSeeder {
     new Demo("admin-1", "Reviewer Nomsa", "reviewer1@spaza.local", "review123", "ADMIN", "Spaza Trust & Safety 1"),
     new Demo("admin-2", "Reviewer Pieter", "reviewer2@spaza.local", "review123", "ADMIN", "Spaza Trust & Safety 2"));
 
-  @Bean CommandLineRunner seedUsers(AppUserRepository users, MandateService mandates) {
+  @Bean CommandLineRunner seedUsers(AppUserRepository users, MandateService mandates, InventoryService inventory) {
     return args -> {
       BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
       for (Demo d : DEMO) if (!users.existsByEmail(d.email())) users.save(new AppUser(d.id(), d.name(), d.email(), encoder.encode(d.password()), d.role(), d.business(), true));
@@ -33,6 +34,12 @@ public class UserSeeder {
           new MandateService.RestockRule("White Bread (700g)", 5, 24, "SUP-002", new BigDecimal("15.00")),
           new MandateService.RestockRule("Maize Meal (10kg)", 5, 10, "SUP-002", new BigDecimal("90.00")),
           new MandateService.RestockRule("Full Cream Milk (2L)", 5, 12, "SUP-002", new BigDecimal("28.00"))));
+      // DEMO restock rules for Sipho's shop, so the agent restocks each shop separately under its own owner's rules.
+      mandates.ensureDefaultRestock("owner-demo-2", new BigDecimal("2000"), List.of(
+          new MandateService.RestockRule("White Bread (700g)", 6, 20, "SUP-002", new BigDecimal("14.00")),
+          new MandateService.RestockRule("Full Cream Milk (2L)", 4, 10, "SUP-002", new BigDecimal("26.00"))));
+      // DEMO stock: every spaza owner (demo or registered) gets their own random shelf if they have none yet.
+      for (AppUser u : users.findAll()) if ("OWNER".equals(u.getRole())) inventory.seedRandomStock(u.getId());
     };
   }
 }

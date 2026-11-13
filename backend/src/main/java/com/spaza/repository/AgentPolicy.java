@@ -1,33 +1,48 @@
 package com.spaza.repository;
 
+import com.spaza.agent.HumanRules;
+import com.spaza.persistence.StateStore;
 import org.springframework.stereotype.Component;
+
 import java.util.*;
 
 /**
- * Human-owned stock rules the agent reads (when to warn, when it may draft an order).
- * Spending limits are NOT here: they live in the owner's SpendingMandate, enforced by MandateService.
+ * Each owner's Human Rules (when to warn, when the agent may order on its own), saved in the database.
+ * They take precedence over restock rules; see {@link HumanRules}. Spending limits are NOT here: they live in the
+ * owner's SpendingMandate, enforced by MandateService.
  */
 @Component
 public class AgentPolicy {
-  private int warningThreshold = 10;
-  private int autoOrderThreshold = 5;
-  private boolean autoOrderEnabled = true;
+  private static final String KIND = "human-rules";
+  private final StateStore store;
+  private final Map<String,HumanRules> byOwner = new HashMap<>();
 
-  public synchronized Map<String,Object> get() {
-    return Map.of("warningThreshold", warningThreshold, "autoOrderThreshold", autoOrderThreshold, "autoOrderEnabled", autoOrderEnabled,
-        "autoOrderMeans", "The agent may DRAFT a group order. It never pays: each member approves their own share and every payment passes the mandate check.");
+  public AgentPolicy(StateStore store) {
+    this.store = store;
+    byOwner.putAll(store.loadMap(KIND, HumanRules.class));
   }
 
-  public synchronized Map<String,Object> update(Map<String,Object> b) {
-    int warning = num(b.getOrDefault("warningThreshold", warningThreshold)), auto = num(b.getOrDefault("autoOrderThreshold", autoOrderThreshold));
+  public synchronized HumanRules rules(String ownerId) { return byOwner.getOrDefault(ownerId, HumanRules.DEFAULT); }
+
+  public synchronized Map<String,Object> get(String ownerId) { return view(rules(ownerId)); }
+
+  public synchronized Map<String,Object> update(String ownerId, Map<String,Object> b) {
+    HumanRules now = rules(ownerId);
+    int warning = num(b.getOrDefault("warningThreshold", now.warningThreshold())), auto = num(b.getOrDefault("autoOrderThreshold", now.autoOrderThreshold()));
     if (warning < 1 || auto < 0 || auto > warning) throw new IllegalArgumentException("Auto-order threshold must be between 0 and the warning threshold");
-    warningThreshold = warning; autoOrderThreshold = auto; autoOrderEnabled = Boolean.TRUE.equals(b.get("autoOrderEnabled"));
-    return get();
+    Object enabled = b.getOrDefault("autoOrderEnabled", now.autoOrderEnabled());
+    HumanRules next = new HumanRules(warning, auto, Boolean.TRUE.equals(enabled) || "true".equals(String.valueOf(enabled)));
+    byOwner.put(ownerId, next);
+    store.save(KIND, ownerId, next);
+    return view(next);
   }
 
-  public synchronized int warningThreshold() { return warningThreshold; }
-  public synchronized int autoOrderThreshold() { return autoOrderThreshold; }
-  public synchronized boolean autoOrderEnabled() { return autoOrderEnabled; }
+  private static Map<String,Object> view(HumanRules r) {
+    return Map.of("warningThreshold", r.warningThreshold(), "autoOrderThreshold", r.autoOrderThreshold(), "autoOrderEnabled", r.autoOrderEnabled(),
+        "autoOrderMeans", "These rules come first. When automatic ordering is on, the agent may place a restock order (paid into escrow under "
+            + "your restock rules and mandate) only when stock is below the auto-order level here AND below the item's restock rule. "
+            + "When it is off, the agent never orders on its own; it only warns you.");
+  }
 
   private static int num(Object v) {
     if (v instanceof Number n) return n.intValue();

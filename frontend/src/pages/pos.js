@@ -26,6 +26,7 @@ export async function renderPOS(root, api, alive) {
       </div>
 
       <div class="card" style="align-self:start;position:sticky;top:20px">
+        <div class="row income-row"><span class="k">Income today</span><b class="mono" id="income-today">…</b></div>
         <div class="card-head"><div><h3>Customer order</h3><p class="sub" id="cart-count">No open order</p></div>
           <button class="btn btn-ghost btn-sm" id="clear">Cancel order</button></div>
         <div id="cart" class="cart-list"></div>
@@ -49,6 +50,11 @@ export async function renderPOS(root, api, alive) {
     </div>`;
 
   const $ = (s) => root.querySelector(s);
+  /** Income = paid (closed) orders only. Refreshed after every payment. */
+  const showIncome = async () => {
+    try { const s = await api.sales(); if (alive()) $('#income-today').textContent = `${money(s.today.revenue)} · ${s.today.count} order${s.today.count === 1 ? '' : 's'}`; } catch { /* keep last value */ }
+  };
+  showIncome();
   const byId = (id) => inventory.find((p) => p.id === id);
   const subtotal = () => Number(order?.subtotal || 0);
 
@@ -60,7 +66,7 @@ export async function renderPOS(root, api, alive) {
         <div class="emoji">${emojiFor(p.category)}</div>
         <div class="name">${esc(p.name)}</div>
         <div class="meta">${esc(p.barcode)}</div>
-        <div class="foot"><span class="price">${money(p.price)}</span><span class="stock">${p.qty <= 0 ? 'Sold out' : p.qty + ' left'}</span></div>
+        <div class="foot"><span class="price">${money(p.price)}</span><span class="stock">${p.qty <= 0 ? 'Sold out' : p.qty + ' left'}</span></div>${p.onOrder ? `<div class="on-order" title="The agent's restock order ${esc(p.onOrder.orderId)} is ${esc(p.onOrder.status.replaceAll('_', ' ').toLowerCase())}">On order: ${p.onOrder.quantity}</div>` : ''}
         <div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn btn-ghost btn-sm" data-edit-price="${esc(p.id)}">Update price</button><button type="button" class="btn btn-primary btn-sm" data-add="${esc(p.id)}" ${p.qty <= 0 ? 'disabled' : ''}>Add</button></div>
       </div>`).join('') || `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div>No products match “${esc(filter)}”</div>`;
   }
@@ -97,11 +103,28 @@ export async function renderPOS(root, api, alive) {
     else if (res.status === 'BLOCKED') text = `🤖 Restock for ${res.product} blocked by your mandate: ${res.reason}`;
     else if (res.status === 'ESCALATED') text = `🤖 ${res.reason}`;
     else if (res.code === 'ORDER_ALREADY_OPEN') text = `🤖 ${res.product}: restock order ${res.orderId} is already open`;
+    else if (res.status === 'HELD_BY_HUMAN_RULES') text = `🤖 ${res.product} is low (${res.stock} left) but not ordered: ${res.reason}`;
+    else if (res.status === 'AGENT_WORKING') { text = `🤖 ${res.product} is below your restock level (${res.stock} left). The agent is placing your order…`; watchRestock(res.product); }
     else return;
     const why = r.llm ? (r.llm.error ? `<br><small>LLM unavailable (${esc(r.llm.error)}); your restock rule was applied.</small>`
       : `<br><small><b>${esc(r.llm.model)}:</b> ${esc(r.llm.answer || '')}${r.llm.fallbackToRule ? ' (the model did not order, so your restock rule was applied)' : ''}</small>`) : '';
     $('#agent-log').insertAdjacentHTML('afterbegin', `<div class="sim-note" style="margin-top:0">${esc(text)}${why}</div>`);
     if (res.status === 'ORDERED' || res.status === 'BLOCKED' || res.status === 'ESCALATED') toast(text.replace('🤖 ', ''), res.status === 'ORDERED' ? 'success' : 'error');
+  }
+
+  /** The LLM agent works in the background: refresh the stock list until the product shows as on order. */
+  function watchRestock(product) {
+    let tries = 0;
+    const tick = async () => {
+      if (!alive() || ++tries > 18) return;
+      const fresh = (await api.inventory()).inventory, p = fresh.find((x) => x.name === product);
+      if (p?.onOrder) {
+        inventory = fresh; drawCatalog();
+        toast(`Agent ordered ${p.onOrder.quantity} × ${product} · ${p.onOrder.orderId} (held in escrow)`, 'success');
+        $('#agent-log').insertAdjacentHTML('afterbegin', `<div class="sim-note" style="margin-top:0">🤖 Agent ordered ${p.onOrder.quantity} × ${esc(product)} · ${esc(p.onOrder.orderId)}</div>`);
+      } else setTimeout(tick, 5000);
+    };
+    setTimeout(tick, 4000);
   }
 
   async function ensureOrder() {
@@ -163,6 +186,7 @@ export async function renderPOS(root, api, alive) {
       const res = await api.closeCustomerOrder(order.id, { paymentMethod: method, cashTendered: tendered });
       toast(`${res.sale.saleId} closed · ${money(res.sale.subtotal)}${res.sale.changeDue ? ' · change ' + money(res.sale.changeDue) : ''}`);
       order = null; $('#cash').value = '';
+      showIncome();
       inventory = (await api.inventory()).inventory;
     }).finally(() => { btn.disabled = false; btn.textContent = 'Take payment & close order'; });
   });

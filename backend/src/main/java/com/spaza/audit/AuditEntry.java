@@ -2,6 +2,7 @@ package com.spaza.audit;
 
 import jakarta.persistence.*;
 import org.hibernate.annotations.Immutable;
+import org.springframework.data.domain.Persistable;
 
 /**
  * One append-only, hash-chained audit record. Hibernate treats the entity as immutable and every
@@ -10,7 +11,7 @@ import org.hibernate.annotations.Immutable;
 @Entity
 @Immutable
 @Table(name = "audit_log")
-public class AuditEntry {
+public class AuditEntry implements Persistable<Long> {
   @Id @Column(updatable = false) private long seq;
   @Column(nullable = false, updatable = false) private String timestamp;
   @Column(nullable = false, updatable = false) private String actorType;
@@ -20,6 +21,12 @@ public class AuditEntry {
   @Column(nullable = false, updatable = false, length = 8000) private String outputs;
   @Column(nullable = false, updatable = false, length = 64) private String prevHash;
   @Column(nullable = false, updatable = false, length = 64) private String hash;
+
+  /** Entries are only ever inserted: telling Spring Data so makes save() a single INSERT (no read-before-write). */
+  @Transient private boolean fresh = true;
+  @PostLoad void loaded() { fresh = false; }
+  @Override public Long getId() { return seq; }
+  @Override public boolean isNew() { return fresh; }
 
   protected AuditEntry() {}
   public AuditEntry(long seq, String timestamp, String actorType, String actorId, String action, String inputs, String outputs, String prevHash, String hash) {

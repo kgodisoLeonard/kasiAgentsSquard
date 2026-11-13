@@ -1,6 +1,7 @@
 package com.spaza.finance;
 
 import com.spaza.audit.AuditLog;
+import com.spaza.persistence.StateStore;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -10,7 +11,8 @@ import java.util.function.Predicate;
 
 /**
  * SIMULATED XRPL Testnet ledger. No transaction is signed or submitted to a real network:
- * balances live in memory and transaction hashes are SHA-256 digests of the simulated transaction.
+ * balances, escrows and transactions are kept in memory, written to the state store on every change and reloaded at
+ * startup; transaction hashes are SHA-256 digests of the simulated transaction.
  *
  * It mirrors XRPL's escrow model (EscrowCreate / EscrowFinish / EscrowCancel) so the money flow is real
  * in shape: a member's share moves from the member's wallet into an escrow whose destination is fixed
@@ -40,10 +42,25 @@ public class SimulatedXrplLedger {
   private final Map<String,BigDecimal> balances = new HashMap<>();
   private final Map<String,Escrow> escrows = new LinkedHashMap<>();
   private final List<Tx> txs = new ArrayList<>();
+  private final StateStore store;
 
-  public SimulatedXrplLedger(Clock clock, Predicate<String> verifiedDestination) {
-    this.clock = clock; this.verifiedDestination = verifiedDestination;
+  /** Stored forms. */
+  record EscrowState(String id, String owner, String destination, BigDecimal amount, String status) {}
+  record TxState(int seq, Tx tx) {}
+
+  public SimulatedXrplLedger(Clock clock, Predicate<String> verifiedDestination) { this(clock, verifiedDestination, StateStore.memory()); }
+
+  public SimulatedXrplLedger(Clock clock, Predicate<String> verifiedDestination, StateStore store) {
+    this.clock = clock; this.verifiedDestination = verifiedDestination; this.store = store;
+    balances.putAll(store.loadMap("ledger-balance", BigDecimal.class));
+    for (EscrowState e : store.loadAll("ledger-escrow", EscrowState.class)) {
+      Escrow x = new Escrow(e.id(), e.owner(), e.destination(), e.amount()); x.status = e.status(); escrows.put(x.id, x);
+    }
+    store.loadAll("ledger-tx", TxState.class).stream().sorted(Comparator.comparingInt(TxState::seq)).forEach(t -> txs.add(t.tx()));
   }
+
+  private void setBalance(String account, BigDecimal amount) { balances.put(account, amount); store.save("ledger-balance", account, amount); }
+  private void saveEscrow(Escrow e) { store.save("ledger-escrow", e.id, new EscrowState(e.id, e.owner, e.destination, e.amount, e.status)); }
 
   public static String walletOf(String ownerId) { return "member-wallet:" + ownerId; }
 
@@ -56,9 +73,10 @@ public class SimulatedXrplLedger {
     requireVerified(supplierAddress);
     if (amount.signum() <= 0) throw new IllegalArgumentException("Amount must be positive");
     if (balance(ownerWallet).compareTo(amount) < 0) throw new IllegalStateException("Insufficient simulated RLUSD balance");
-    balances.put(ownerWallet, balance(ownerWallet).subtract(amount));
+    setBalance(ownerWallet, balance(ownerWallet).subtract(amount));
     Tx tx = tx("EscrowCreate", ownerWallet, supplierAddress, amount, memo);
-    escrows.put(tx.hash(), new Escrow(tx.hash(), ownerWallet, supplierAddress, amount));
+    Escrow created = new Escrow(tx.hash(), ownerWallet, supplierAddress, amount);
+    escrows.put(tx.hash(), created); saveEscrow(created);
     return tx;
   }
 
@@ -66,16 +84,16 @@ public class SimulatedXrplLedger {
   public synchronized Tx finishEscrow(String escrowId, String memo) {
     Escrow e = held(escrowId);
     requireVerified(e.destination);
-    e.status = "FINISHED";
-    balances.put(e.destination, balance(e.destination).add(e.amount));
+    e.status = "FINISHED"; saveEscrow(e);
+    setBalance(e.destination, balance(e.destination).add(e.amount));
     return tx("EscrowFinish", e.owner, e.destination, e.amount, memo);
   }
 
   /** Returns a held escrow to the member who funded it. */
   public synchronized Tx cancelEscrow(String escrowId, String memo) {
     Escrow e = held(escrowId);
-    e.status = "CANCELLED";
-    balances.put(e.owner, balance(e.owner).add(e.amount));
+    e.status = "CANCELLED"; saveEscrow(e);
+    setBalance(e.owner, balance(e.owner).add(e.amount));
     return tx("EscrowCancel", e.destination, e.owner, e.amount, memo);
   }
 
@@ -85,8 +103,8 @@ public class SimulatedXrplLedger {
     requireVerified(supplierAddress);
     if (amount.signum() <= 0) throw new IllegalArgumentException("Amount must be positive");
     if (balance(ownerWallet).compareTo(amount) < 0) throw new IllegalStateException("Insufficient simulated RLUSD balance");
-    balances.put(ownerWallet, balance(ownerWallet).subtract(amount));
-    balances.put(supplierAddress, balance(supplierAddress).add(amount));
+    setBalance(ownerWallet, balance(ownerWallet).subtract(amount));
+    setBalance(supplierAddress, balance(supplierAddress).add(amount));
     return tx("Payment", ownerWallet, supplierAddress, amount, memo);
   }
 
@@ -112,6 +130,7 @@ public class SimulatedXrplLedger {
     String hash = AuditLog.sha256(String.join("|", type, from, to, amount.toPlainString(), memo == null ? "" : memo, ts, Integer.toString(txs.size()))).toUpperCase(Locale.ROOT);
     Tx tx = new Tx(hash, type, from, to, amount, memo, ts);
     txs.add(tx);
+    store.save("ledger-tx", hash, new TxState(txs.size(), tx));
     return tx;
   }
 

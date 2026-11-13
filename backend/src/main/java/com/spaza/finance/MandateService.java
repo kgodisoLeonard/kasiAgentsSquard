@@ -2,6 +2,7 @@ package com.spaza.finance;
 
 import com.spaza.audit.AuditLog;
 import com.spaza.audit.AuditLog.ActorType;
+import com.spaza.persistence.StateStore;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,8 +35,34 @@ public class MandateService implements MandateReader {
   private final Map<String,BigDecimal> agentSpentByOwnerMonth = new HashMap<>();
   private final ObjectMapper json = new ObjectMapper();
 
+  private final StateStore store;
+
   public MandateService(SpendingMandateRepository repository, SupplierRegistry suppliers, AuditLog audit, Clock clock) {
-    this.repository = repository; this.suppliers = suppliers; this.audit = audit; this.clock = clock;
+    this(repository, suppliers, audit, clock, StateStore.memory());
+  }
+
+  /** Daily spend and the agent's monthly spend are written through to the state store, so caps and budgets hold across restarts. */
+  public MandateService(SpendingMandateRepository repository, SupplierRegistry suppliers, AuditLog audit, Clock clock, StateStore store) {
+    this.repository = repository; this.suppliers = suppliers; this.audit = audit; this.clock = clock; this.store = store;
+    spentByOwnerDay.putAll(store.loadMap("spend-day", BigDecimal.class));
+    agentSpentByOwnerMonth.putAll(store.loadMap("spend-agent-month", BigDecimal.class));
+  }
+
+  /** Mandates are read on every payment and restock check; keep them in memory once loaded. Saves stay synchronous. */
+  private final Map<String,Optional<SpendingMandate>> mandateCache = new HashMap<>();
+
+  private Optional<SpendingMandate> mandate(String ownerId) { return mandateCache.computeIfAbsent(ownerId, repository::findById); }
+
+  private SpendingMandate saveMandate(SpendingMandate m) {
+    SpendingMandate saved = repository.save(m);
+    mandateCache.put(saved.getOwnerId(), Optional.of(saved));
+    return saved;
+  }
+
+  private void saveSpend(String ownerId) {
+    String day = dayKey(ownerId), month = monthKey(ownerId);
+    if (spentByOwnerDay.containsKey(day)) store.save("spend-day", day, spentByOwnerDay.get(day));
+    if (agentSpentByOwnerMonth.containsKey(month)) store.save("spend-agent-month", month, agentSpentByOwnerMonth.get(month));
   }
 
   public synchronized Decision authorize(PaymentRequest r) {
@@ -43,6 +70,7 @@ public class MandateService implements MandateReader {
     if (d.allowed()) {
       spentByOwnerDay.merge(dayKey(r.ownerId()), r.amount(), BigDecimal::add);
       if (isAgent(r)) agentSpentByOwnerMonth.merge(monthKey(r.ownerId()), r.amount(), BigDecimal::add);
+      saveSpend(r.ownerId());
     }
     Map<String,Object> in = new LinkedHashMap<>();
     in.put("ownerId", r.ownerId()); in.put("supplierId", r.supplierId()); in.put("amount", r.amount().toPlainString());
@@ -57,10 +85,11 @@ public class MandateService implements MandateReader {
   public synchronized void release(String ownerId, BigDecimal amount, boolean agentInitiated) {
     spentByOwnerDay.computeIfPresent(dayKey(ownerId), (k, v) -> v.subtract(amount).max(BigDecimal.ZERO));
     if (agentInitiated) agentSpentByOwnerMonth.computeIfPresent(monthKey(ownerId), (k, v) -> v.subtract(amount).max(BigDecimal.ZERO));
+    saveSpend(ownerId);
   }
 
   private Decision evaluate(PaymentRequest r) {
-    Optional<SpendingMandate> found = repository.findById(r.ownerId());
+    Optional<SpendingMandate> found = mandate(r.ownerId());
     if (found.isEmpty()) return blocked("NO_MANDATE", "No spending mandate is set. The owner must create one before any payment.");
     SpendingMandate m = found.get();
     LocalDate today = LocalDate.now(clock);
@@ -89,12 +118,12 @@ public class MandateService implements MandateReader {
     if (perOrderCap.compareTo(dailyCap) > 0) throw new IllegalArgumentException("Per-order cap cannot exceed the daily cap");
     if (validUntil == null || validUntil.isBefore(LocalDate.now(clock))) throw new IllegalArgumentException("Valid-until date must be today or later");
     for (String id : allowedSuppliers) if (suppliers.find(id).isEmpty()) throw new IllegalArgumentException("Unknown supplier: " + id);
-    SpendingMandate before = repository.findById(ownerId).orElse(null);
+    SpendingMandate before = mandate(ownerId).orElse(null);
     Map<String,Object> previous = before == null ? Map.of("exists", false) : view(before);
     SpendingMandate m;
     if (before == null) m = new SpendingMandate(ownerId, perOrderCap, dailyCap, allowedSuppliers, validUntil, enforceOrderDeadline, actor.userId(), clock.instant());
     else { m = before; m.apply(perOrderCap, dailyCap, allowedSuppliers, validUntil, enforceOrderDeadline, actor.userId(), clock.instant()); }
-    SpendingMandate saved = repository.save(m);
+    SpendingMandate saved = saveMandate(m);
     audit.record(ActorType.HUMAN, actor.userId(), "MANDATE_CHANGED", Map.of("ownerId", ownerId, "previous", previous), view(saved));
     return saved;
   }
@@ -102,7 +131,7 @@ public class MandateService implements MandateReader {
   /** Only the owning human can set the agent's budget and restock rules. Rules must use approved suppliers. */
   public synchronized SpendingMandate updateAutonomy(HumanActor actor, String ownerId, BigDecimal monthlyBudget, List<RestockRule> rules) {
     if (actor == null || !"OWNER".equals(actor.role()) || !actor.userId().equals(ownerId)) throw new SecurityException("Only the owner of this mandate can change it");
-    SpendingMandate m = repository.findById(ownerId).orElseThrow(() -> new IllegalStateException("Create your spending mandate before adding restock rules"));
+    SpendingMandate m = mandate(ownerId).orElseThrow(() -> new IllegalStateException("Create your spending mandate before adding restock rules"));
     BigDecimal budget = monthlyBudget == null ? BigDecimal.ZERO : monthlyBudget;
     if (budget.signum() < 0) throw new IllegalArgumentException("Agent budget cannot be negative");
     Set<String> products = new HashSet<>();
@@ -117,13 +146,13 @@ public class MandateService implements MandateReader {
     Map<String,Object> previous = view(m);
     try { m.applyAutonomy(budget, json.writeValueAsString(rules), actor.userId(), clock.instant()); }
     catch (Exception e) { throw new IllegalArgumentException("Could not save restock rules"); }
-    SpendingMandate saved = repository.save(m);
+    SpendingMandate saved = saveMandate(m);
     audit.record(ActorType.HUMAN, actor.userId(), "MANDATE_CHANGED", Map.of("ownerId", ownerId, "previous", previous, "part", "agent budget and restock rules"), view(saved));
     return saved;
   }
 
   public synchronized List<RestockRule> restockRules(String ownerId) {
-    return repository.findById(ownerId).map(this::rules).orElse(List.of());
+    return mandate(ownerId).map(this::rules).orElse(List.of());
   }
 
   private List<RestockRule> rules(SpendingMandate m) {
@@ -133,23 +162,23 @@ public class MandateService implements MandateReader {
 
   /** Seeds demo restock rules and budget for a demo owner when none are set yet. */
   public synchronized void ensureDefaultRestock(String ownerId, BigDecimal budget, List<RestockRule> rules) {
-    Optional<SpendingMandate> found = repository.findById(ownerId);
+    Optional<SpendingMandate> found = mandate(ownerId);
     if (found.isEmpty() || found.get().getMonthlyAgentBudget().signum() != 0 || !rules(found.get()).isEmpty()) return;
     SpendingMandate m = found.get();
     try { m.applyAutonomy(budget, json.writeValueAsString(rules), "system-seed", clock.instant()); } catch (Exception e) { return; }
-    repository.save(m);
+    saveMandate(m);
     audit.record(ActorType.SYSTEM, "seed", "RESTOCK_RULES_SEEDED", Map.of("ownerId", ownerId), view(m));
   }
 
   /** Seeds a default mandate for demo accounts only when none exists. */
   public synchronized void ensureDefault(String ownerId, List<String> allowedSuppliers) {
-    if (repository.findById(ownerId).isPresent()) return;
-    SpendingMandate m = repository.save(new SpendingMandate(ownerId, new BigDecimal("2000.00"), new BigDecimal("5000.00"), allowedSuppliers, LocalDate.now(clock).plusDays(90), true, "system-seed", clock.instant()));
+    if (mandate(ownerId).isPresent()) return;
+    SpendingMandate m = saveMandate(new SpendingMandate(ownerId, new BigDecimal("2000.00"), new BigDecimal("5000.00"), allowedSuppliers, LocalDate.now(clock).plusDays(90), true, "system-seed", clock.instant()));
     audit.record(ActorType.SYSTEM, "seed", "MANDATE_SEEDED", Map.of("ownerId", ownerId), view(m));
   }
 
   @Override public synchronized Optional<Map<String,Object>> snapshot(String ownerId) {
-    return repository.findById(ownerId).map(this::view);
+    return mandate(ownerId).map(this::view);
   }
 
   public synchronized BigDecimal spentToday(String ownerId) { return spentByOwnerDay.getOrDefault(dayKey(ownerId), BigDecimal.ZERO); }

@@ -2,6 +2,7 @@ package com.spaza.controller;
 
 import com.spaza.audit.AuditLog;
 import com.spaza.audit.AuditLog.ActorType;
+import com.spaza.inventory.InventoryService;
 import com.spaza.model.AppUser;
 import com.spaza.repository.AppUserRepository;
 import com.spaza.security.AuthInterceptor;
@@ -28,16 +29,19 @@ public class AuthController {
   private final AuthService auth;
   private final AuditLog audit;
   private final SupabaseAuth supabase;
+  private final InventoryService inventory;
   private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-  public AuthController(AppUserRepository users, AuthService auth, AuditLog audit, SupabaseAuth supabase) { this.users = users; this.auth = auth; this.audit = audit; this.supabase = supabase; }
+  public AuthController(AppUserRepository users, AuthService auth, AuditLog audit, SupabaseAuth supabase, InventoryService inventory) {
+    this.users = users; this.auth = auth; this.audit = audit; this.supabase = supabase; this.inventory = inventory;
+  }
 
-  /** Step 1: password check. Returns a one-time-code challenge (MFA is mandatory). */
+  /** Business name + password. Returns the session tokens directly (no SMS code at sign-in). */
   @PostMapping("/login") public ResponseEntity<?> login(@RequestBody(required = false) Map<String,Object> body, HttpServletRequest req) {
     String business = text(body, "businessName"), password = text(body, "password");
     if (business.isEmpty() || password.isEmpty()) return error(400, "Business name and password are required");
     if (business.length() > MAX_NAME || password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) return error(401, "Invalid business name or password");
-    return ResponseEntity.ok(auth.startLogin(business, password, req.getRemoteAddr()));
+    return ResponseEntity.ok(auth.login(business, password, text(body, "deviceId"), req.getRemoteAddr()));
   }
 
   /** Step 2: one-time code. Returns a short-lived access token and a rotating refresh token. */
@@ -75,6 +79,7 @@ public class AuthController {
       AppUser fresh = new AppUser(UUID.randomUUID().toString(), name, email, hash, role, business, false);
       fresh.setSupabaseId(supabaseId);
       AppUser user = users.saveAndFlush(fresh);
+      if ("OWNER".equals(role)) inventory.seedRandomStock(user.getId());   // DEMO: a new shop starts with a random shelf
       audit.record(ActorType.HUMAN, user.getId(), "ACCOUNT_REGISTERED", Map.of("role", role, "auth", supabaseId == null ? "local" : "supabase"), Map.of("level", 1));
       return ResponseEntity.status(201).body(Map.of("success", true, "user", AuthService.userView(user), "confirmEmail", confirm, "next", next));
     } catch (DataIntegrityViolationException e) {

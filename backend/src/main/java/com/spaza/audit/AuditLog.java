@@ -2,6 +2,8 @@ package com.spaza.audit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.spaza.persistence.WriteBehind;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -27,8 +29,15 @@ public class AuditLog {
   private long lastSeq = -1;
   private String lastHash;
 
-  public AuditLog(AuditEntryRepository repository, Clock clock) {
-    this.repository = repository; this.clock = clock;
+  /** Null in unit tests (writes are then synchronous). */
+  private final WriteBehind writer;
+
+  public AuditLog(AuditEntryRepository repository, Clock clock) { this(repository, clock, null); }
+
+  /** Production: the hash chain is computed immediately in memory; the insert is queued in order on the writer thread. */
+  @Autowired
+  public AuditLog(AuditEntryRepository repository, Clock clock, WriteBehind writer) {
+    this.repository = repository; this.clock = clock; this.writer = writer;
   }
 
   public synchronized AuditEntry record(ActorType actorType, String actorId, String action, Map<String,?> inputs, Map<String,?> outputs) {
@@ -42,13 +51,15 @@ public class AuditLog {
     String in = toJson(inputs), out = toJson(outputs);
     String actor = actorId == null || actorId.isBlank() ? "unknown" : actorId;
     String hash = hash(lastHash, seq, ts, actorType.name(), actor, action, in, out);
-    AuditEntry saved = repository.save(new AuditEntry(seq, ts, actorType.name(), actor, action, in, out, lastHash, hash));
+    AuditEntry entry = new AuditEntry(seq, ts, actorType.name(), actor, action, in, out, lastHash, hash);
+    if (writer == null) repository.save(entry); else writer.submit("audit_log", () -> repository.save(entry));
     lastSeq = seq; lastHash = hash;
-    return saved;
+    return entry;
   }
 
   /** Recomputes the whole chain. Returns valid=false and the first broken sequence number on tampering. */
   public synchronized Map<String,Object> verify() {
+    if (writer != null) writer.flush();
     String prev = GENESIS; long expected = 1; int count = 0;
     for (AuditEntry e : repository.findAllByOrderBySeqAsc()) {
       String problem = null;
@@ -61,7 +72,7 @@ public class AuditLog {
     return Map.of("valid", true, "checked", count, "headHash", prev);
   }
 
-  public List<AuditEntry> recent() { return repository.findTop200ByOrderBySeqDesc(); }
+  public List<AuditEntry> recent() { if (writer != null) writer.flush(); return repository.findTop200ByOrderBySeqDesc(); }
 
   static String hash(String prev, long seq, String ts, String actorType, String actorId, String action, String in, String out) {
     return sha256(String.join("|", prev, Long.toString(seq), ts, actorType, actorId, action, in, out));

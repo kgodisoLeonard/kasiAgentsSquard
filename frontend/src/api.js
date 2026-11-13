@@ -90,7 +90,7 @@ export async function withStepUp(run) {
 }
 
 export const api = {
-  login: (body) => post('/auth/login', body),
+  login: (body) => post('/auth/login', { ...body, deviceId: deviceId() }),
   verifyMfa: (challengeId, code) => post('/auth/mfa/verify', { challengeId, code, deviceId: deviceId() }),
   register: (body) => post('/auth/register', body),
   me: () => request('/auth/me'),
@@ -150,6 +150,7 @@ export const api = {
   platformOverview: () => request('/platform/overview'),
   suppliers: () => request('/platform/suppliers'),
   directory: () => request('/platform/directory'),
+  recommendedSuppliers: () => request('/platform/suppliers/recommended'),
   rateSupplier: (supplierId, body) => post(`/platform/suppliers/${encodeURIComponent(supplierId)}/ratings`, body),
   notifications: () => request('/platform/notifications'),
   ownerSuppliers: (ownerId) => request(`/platform/owners/${encodeURIComponent(ownerId)}/suppliers`),

@@ -6,7 +6,7 @@ import com.spaza.finance.GroupOrderService;
 import com.spaza.model.Product;
 import com.spaza.repository.AgentPolicy;
 import com.spaza.repository.AppUserRepository;
-import com.spaza.repository.InMemoryStore;
+import com.spaza.inventory.InventoryService;
 import com.spaza.security.AuthInterceptor;
 import com.spaza.security.AuthService.AuthUser;
 import com.spaza.security.RequireRole;
@@ -24,10 +24,10 @@ import java.util.*;
 @RequestMapping("/api/agent")
 @RequireRole("OWNER")
 public class AgentController {
-  private final InMemoryStore store; private final AgentPolicy policy; private final PlatformController platform;
+  private final InventoryService store; private final AgentPolicy policy; private final PlatformController platform;
   private final AgentGateway agent; private final GroupOrderService orders; private final AppUserRepository users; private final LlmAgent llm;
 
-  public AgentController(InMemoryStore store, AgentPolicy policy, PlatformController platform, AgentGateway agent, GroupOrderService orders, AppUserRepository users, LlmAgent llm) {
+  public AgentController(InventoryService store, AgentPolicy policy, PlatformController platform, AgentGateway agent, GroupOrderService orders, AppUserRepository users, LlmAgent llm) {
     this.store = store; this.policy = policy; this.platform = platform; this.agent = agent; this.orders = orders; this.users = users; this.llm = llm;
   }
 
@@ -44,8 +44,8 @@ public class AgentController {
   }
 
   @GetMapping("/rules")
-  public Map<String,Object> rules() {
-    return Map.of("success", true, "rules", policy.get(), "access", "READ_ONLY",
+  public Map<String,Object> rules(HttpServletRequest req) {
+    return Map.of("success", true, "rules", policy.get(AuthInterceptor.current(req).id()), "access", "READ_ONLY",
         "allowedActions", Arrays.stream(AgentGateway.Action.values()).map(Enum::name).toList(),
         "restrictedResources", List.of("mandate changes", "wallets", "bank_details", "identity_documents", "secrets"),
         "systemPrompt", AgentGateway.SYSTEM_PROMPT);
@@ -65,8 +65,8 @@ public class AgentController {
     AuthUser u = AuthInterceptor.current(req);
     Map<String,Object> scan = agent.execute("DETECT_SHORTAGES", Map.of(), u.id());
     List<Map<String,Object>> recommendations = new ArrayList<>();
-    for (Product p : store.findAll()) {
-      if (p.getQty() > policy.warningThreshold()) continue;
+    for (Product p : store.list(u.id())) {
+      if (p.getQty() > policy.rules(u.id()).warningThreshold()) continue;
       Optional<Map<String,Object>> offer = platform.offerFor(p.getName());
       Map<String,Object> rec = new LinkedHashMap<>();
       rec.put("product", p.getName()); rec.put("stock", p.getQty()); rec.put("reorderLevel", p.getLowStock());
@@ -76,8 +76,8 @@ public class AgentController {
       rec.put("supplierId", o.get("id")); rec.put("supplierName", o.get("name")); rec.put("offerProduct", o.get("product"));
       rec.put("unitPrice", o.get("price")); rec.put("minOrder", o.get("minOrder")); rec.put("confidence", "HIGH");
       rec.put("draftParams", draftParams(u, o));
-      boolean auto = policy.autoOrderEnabled() && p.getQty() < policy.autoOrderThreshold();
-      var existing = orders.openOrderFor(String.valueOf(o.get("id")), String.valueOf(o.get("product")));
+      boolean auto = policy.rules(u.id()).blocks(p.getQty()) == null;
+      var existing = orders.openOrderForMember(u.id(), p.getName()).or(() -> orders.openOrderFor(String.valueOf(o.get("id")), String.valueOf(o.get("product"))));
       if (existing.isPresent()) { rec.put("status", "ORDER_OPEN"); rec.put("orderId", existing.get().id()); }
       else if (auto) {
         Map<String,Object> drafted = agent.execute("DRAFT_GROUP_ORDER", draftParams(u, o), u.id());
@@ -86,7 +86,7 @@ public class AgentController {
       } else rec.put("status", "RECOMMENDED");
       recommendations.add(rec);
     }
-    return Map.of("success", true, "scan", scan, "recommendations", recommendations, "humanRules", policy.get(),
+    return Map.of("success", true, "scan", scan, "recommendations", recommendations, "humanRules", policy.get(u.id()),
         "note", "The agent only drafts. Each member approves their own share; payment then passes the mandate check before escrow.");
   }
 

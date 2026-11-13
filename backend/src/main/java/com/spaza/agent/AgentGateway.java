@@ -5,8 +5,10 @@ import com.spaza.audit.AuditLog.ActorType;
 import com.spaza.finance.*;
 import com.spaza.model.AppUser;
 import com.spaza.model.Product;
+import com.spaza.persistence.StateStore;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.*;
 import java.util.function.BooleanSupplier;
@@ -49,17 +51,34 @@ public class AgentGateway {
   private final MandateReader mandates;
   private final GroupOrderService orders;
   private final SupplierRegistry suppliers;
-  private final Supplier<List<Product>> inventory;
+  /** The stock of the shop the agent is working for (owner id -> that shop's products). */
+  private final Function<String,List<Product>> inventory;
   private final BooleanSupplier enabled;
   private final AuditLog audit;
   private final SupplierCatalog catalog;
   private final Function<String,Optional<AppUser>> owners;
   private final List<Map<String,Object>> notifications = new ArrayList<>();
+  private final StateStore store;
+  private final Clock clock;
+  /** The owner's Human Rules; they are checked before any automatic order and override the restock rules. */
+  private final Function<String,HumanRules> humanRules;
 
+  /** Single shared stock list (unit tests). */
   public AgentGateway(MandateReader mandates, GroupOrderService orders, SupplierRegistry suppliers, Supplier<List<Product>> inventory, BooleanSupplier enabled, AuditLog audit,
                       SupplierCatalog catalog, Function<String,Optional<AppUser>> owners) {
+    this(mandates, orders, suppliers, owner -> inventory.get(), enabled, audit, catalog, owners, StateStore.memory(), Clock.systemUTC(), owner -> HumanRules.UNRESTRICTED);
+  }
+
+  /** Per-shop stock; notifications are written to the state store so they survive restarts. */
+  public AgentGateway(MandateReader mandates, GroupOrderService orders, SupplierRegistry suppliers, Function<String,List<Product>> inventory, BooleanSupplier enabled,
+                      AuditLog audit, SupplierCatalog catalog, Function<String,Optional<AppUser>> owners, StateStore store, Clock clock,
+                      Function<String,HumanRules> humanRules) {
+    this.humanRules = humanRules;
     this.mandates = mandates; this.orders = orders; this.suppliers = suppliers; this.inventory = inventory; this.enabled = enabled; this.audit = audit;
-    this.catalog = catalog; this.owners = owners;
+    this.catalog = catalog; this.owners = owners; this.store = store; this.clock = clock;
+    store.loadAll("agent-notification", Map.class).stream()
+        .sorted(Comparator.comparing(n -> String.valueOf(((Map<?,?>) n).get("at"))))
+        .forEach(n -> { @SuppressWarnings("unchecked") Map<String,Object> m = (Map<String,Object>) n; notifications.add(m); });
   }
 
   /** @param onBehalfOf the human owner the agent is working for (from the authenticated session or the scheduler). */
@@ -79,7 +98,7 @@ public class AgentGateway {
 
     try {
       Map<String,Object> result = switch (action) {
-        case DETECT_SHORTAGES -> detectShortages();
+        case DETECT_SHORTAGES -> detectShortages(onBehalfOf);
         case RECOMMEND_SUPPLIER -> recommend(str(p, "product"));
         case NOTIFY -> notify(str(p, "recipientId").isBlank() ? onBehalfOf : str(p, "recipientId"), str(p, "message"));
         case DRAFT_GROUP_ORDER -> draft(p, onBehalfOf);
@@ -105,8 +124,8 @@ public class AgentGateway {
     return Map.of("allowed", false, "action", inputs.get("action"), "code", code, "reason", reason);
   }
 
-  private Map<String,Object> detectShortages() {
-    List<Map<String,Object>> low = inventory.get().stream().filter(p -> p.getQty() <= p.getLowStock())
+  private Map<String,Object> detectShortages(String ownerId) {
+    List<Map<String,Object>> low = inventory.apply(ownerId).stream().filter(p -> p.getQty() <= p.getLowStock())
         .map(p -> Map.<String,Object>of("product", p.getName(), "stock", p.getQty(), "reorderLevel", p.getLowStock(), "source", "inventory record " + p.getId())).toList();
     return Map.of("shortages", low, "count", low.size());
   }
@@ -126,8 +145,11 @@ public class AgentGateway {
   private Map<String,Object> notify(String recipientId, String message) {
     if (recipientId.isBlank() || message.isBlank()) throw new IllegalArgumentException("recipientId and message are required");
     UntrustedText.Inspection msg = UntrustedText.inspect(message);
-    Map<String,Object> n = Map.of("recipientId", recipientId, "message", msg.text(), "channel", "IN_APP (SMS/WhatsApp simulated)", "flagged", msg.suspicious());
+    String id = "N-" + UUID.randomUUID().toString().substring(0, 8);
+    Map<String,Object> n = new LinkedHashMap<>(Map.of("id", id, "recipientId", recipientId, "message", msg.text(), "channel", "IN_APP (SMS/WhatsApp simulated)",
+        "flagged", msg.suspicious(), "at", clock.instant().toString()));
     notifications.add(n);
+    store.save("agent-notification", id, n);
     return n;
   }
 
@@ -162,12 +184,15 @@ public class AgentGateway {
     List<Map<String,Object>> rules = (List<Map<String,Object>>) mandate.getOrDefault("restockRules", List.of());
     Map<String,Object> rule = rules.stream().filter(r -> product.equalsIgnoreCase(String.valueOf(r.get("product")))).findFirst().orElse(null);
     if (rule == null) return skip(result, "NO_RULE", "No restock rule in the owner's mandate for this product");
-    Product item = inventory.get().stream().filter(x -> x.getName().equalsIgnoreCase(product)).findFirst().orElse(null);
+    Product item = inventory.apply(ownerId).stream().filter(x -> x.getName().equalsIgnoreCase(product)).findFirst().orElse(null);
     if (item == null) return skip(result, "UNKNOWN_PRODUCT", "Product is not in the shop inventory");
     int below = ((Number) rule.get("reorderBelow")).intValue(), qty = ((Number) rule.get("orderQuantity")).intValue();
     String supplierId = String.valueOf(rule.get("supplierId"));
     result.put("stock", item.getQty()); result.put("reorderBelow", below);
     if (item.getQty() >= below) return skip(result, "STOCK_OK", "Stock " + item.getQty() + " is not below the reorder level " + below);
+    // Human Rules come first: they can switch automatic ordering off or require a lower stock level than the restock rule.
+    String heldBy = humanRules.apply(ownerId).blocks(item.getQty());
+    if (heldBy != null) { result.put("status", "HELD_BY_HUMAN_RULES"); result.put("code", "HUMAN_RULES"); result.put("reason", heldBy); return result; }
     Optional<GroupOrder> open = orders.openOrderForMember(ownerId, item.getName());
     if (open.isPresent()) { result.put("orderId", open.get().id()); return skip(result, "ORDER_ALREADY_OPEN", "Order " + open.get().id() + " for this product is still open"); }
     Optional<SupplierCatalog.Item> price = catalog.price(supplierId, item.getName());

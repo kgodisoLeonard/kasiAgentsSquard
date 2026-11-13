@@ -2,13 +2,14 @@ package com.spaza.controller;
 
 import com.spaza.finance.GroupOrder;
 import com.spaza.finance.GroupOrderService;
+import com.spaza.finance.SupplierCatalog;
 import com.spaza.finance.SupplierRegistry;
+import com.spaza.inventory.InventoryService;
 import com.spaza.model.AppUser;
 import com.spaza.model.OwnerSupplier;
 import com.spaza.model.Product;
 import com.spaza.model.SupplierRating;
 import com.spaza.repository.AppUserRepository;
-import com.spaza.repository.InMemoryStore;
 import com.spaza.repository.OwnerSupplierRepository;
 import com.spaza.repository.SupplierRatingRepository;
 import com.spaza.security.AuthInterceptor;
@@ -29,7 +30,8 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/platform")
 public class PlatformController {
-  private final InMemoryStore store;
+  private final InventoryService store;
+  private final SupplierCatalog catalog;
   private final AppUserRepository users;
   private final SupplierRatingRepository ratings;
   private final OwnerSupplierRepository ownerSuppliers;
@@ -40,9 +42,9 @@ public class PlatformController {
     offer("SUP-001", "Minced Meat", 65.0, 50, 1),
     offer("SUP-002", "Maize Meal", 82.0, 30, 2));
 
-  public PlatformController(InMemoryStore store, AppUserRepository users, SupplierRatingRepository ratings, OwnerSupplierRepository ownerSuppliers,
+  public PlatformController(InventoryService store, SupplierCatalog catalog, AppUserRepository users, SupplierRatingRepository ratings, OwnerSupplierRepository ownerSuppliers,
                             SupplierRegistry registry, GroupOrderService orders) {
-    this.store = store; this.users = users; this.ratings = ratings; this.ownerSuppliers = ownerSuppliers; this.registry = registry; this.orders = orders;
+    this.store = store; this.catalog = catalog; this.users = users; this.ratings = ratings; this.ownerSuppliers = ownerSuppliers; this.registry = registry; this.orders = orders;
   }
 
   @GetMapping("/overview") public Map<String,Object> overview(HttpServletRequest req) {
@@ -95,6 +97,46 @@ public class PlatformController {
     return list;
   }
 
+  /**
+   * Best suppliers for the signed-in owner's shop, best first. Score (0-100) = 45% owner ratings (smoothed towards 3.5
+   * stars until a supplier has several reviews, so one review cannot dominate) + 30% verified delivery record + 25% fit
+   * with this shop (share of its products the supplier sells, weighted towards items running low).
+   * Only verified, unscreened suppliers are ranked. Supplier-written text is never used for ranking.
+   */
+  @GetMapping("/suppliers/recommended") @RequireRole("OWNER")
+  public Map<String,Object> recommended(HttpServletRequest req) {
+    String ownerId = AuthInterceptor.current(req).id();
+    List<Product> stock = store.list(ownerId);
+    Set<String> names = new HashSet<>(), low = new HashSet<>();
+    for (Product p : stock) { names.add(p.getName().toLowerCase(Locale.ROOT)); if (p.getQty() <= p.getLowStock()) low.add(p.getName().toLowerCase(Locale.ROOT)); }
+    List<Map<String,Object>> ranked = new ArrayList<>();
+    for (SupplierRegistry.SupplierInfo s : registry.all()) {
+      if (!s.canReceiveOrders()) continue;
+      List<SupplierRating> reviews = ratings.findBySupplierIdOrderByCreatedAtDesc(s.id());
+      int n = reviews.size(); double sum = reviews.stream().mapToInt(SupplierRating::getRating).sum();
+      double smoothed = (3.5 * 2 + sum) / (2 + n);
+      Set<String> sells = new HashSet<>();
+      catalog.bySupplier(s.id()).forEach(i -> sells.add(i.product().toLowerCase(Locale.ROOT)));
+      long covered = names.stream().filter(sells::contains).count(), lowCovered = low.stream().filter(sells::contains).count();
+      double fit = names.isEmpty() ? 0 : 0.5 * covered / names.size() + 0.5 * (low.isEmpty() ? (double) covered / names.size() : (double) lowCovered / low.size());
+      double delivery = Math.min(s.completedDeliveries(), 50) / 50.0;
+      double score = 100 * (0.45 * smoothed / 5 + 0.30 * delivery + 0.25 * fit);
+      List<String> reasons = new ArrayList<>();
+      reasons.add(n == 0 ? "No owner reviews yet" : String.format(Locale.ROOT, "%.1f stars from %d review%s", sum / n, n, n == 1 ? "" : "s"));
+      reasons.add(s.completedDeliveries() + " completed deliveries" + (s.onTrial() ? " (new supplier on trial)" : ""));
+      reasons.add("Sells " + covered + " of your " + names.size() + " products" + (low.isEmpty() ? "" : ", " + lowCovered + " of " + low.size() + " running low"));
+      Map<String,Object> v = new LinkedHashMap<>();
+      v.put("id", s.id()); v.put("name", s.name()); v.put("score", Math.round(score * 10) / 10.0);
+      v.put("rating", n == 0 ? 0.0 : Math.round(sum / n * 10) / 10.0); v.put("ratingCount", n); v.put("completedDeliveries", s.completedDeliveries());
+      v.put("onTrial", s.onTrial()); v.put("productsCovered", covered); v.put("lowStockCovered", lowCovered); v.put("reasons", reasons);
+      v.put("latestReviews", reviews.stream().limit(3).map(this::ratingView).toList());
+      ranked.add(v);
+    }
+    ranked.sort(Comparator.comparingDouble((Map<String,Object> v) -> (Double) v.get("score")).reversed());
+    return Map.of("success", true, "suppliers", ranked,
+        "basis", "45% owner ratings, 30% delivery record, 25% fit with your stock (items running low count double)");
+  }
+
   private double averageRating(String supplierId, double fallback) {
     double avg = ratings.findBySupplierIdOrderByCreatedAtDesc(supplierId).stream().mapToInt(SupplierRating::getRating).average().orElse(fallback);
     return Math.round(avg * 10) / 10.0;
@@ -123,7 +165,7 @@ public class PlatformController {
   @GetMapping("/notifications") public Map<String,Object> notifications(HttpServletRequest req) {
     AuthUser u = AuthInterceptor.current(req);
     List<Map<String,Object>> notices = new ArrayList<>();
-    for (Product p : store.findAll()) {
+    for (Product p : store.list(u.id())) {
       if (p.getQty() <= p.getLowStock()) {
         notices.add(Map.of("id", "LOW-OWNER-" + p.getId(), "recipient", "OWNER", "recipientName", u.name(), "type", "LOW_STOCK", "title", "Restock needed",
             "message", p.getName() + " has " + p.getQty() + " left (reorder level: " + p.getLowStock() + ").", "action", "Review supplier offer", "read", false));

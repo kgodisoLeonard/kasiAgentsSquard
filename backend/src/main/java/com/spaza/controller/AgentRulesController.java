@@ -17,14 +17,15 @@ public class AgentRulesController {
 
   public AgentRulesController(AgentPolicy policy, AuditLog audit) { this.policy = policy; this.audit = audit; }
 
-  @GetMapping public Map<String,Object> get() {
-    return Map.of("success", true, "rules", policy.get(), "note", "Only authorised human owners can change these guardrails.");
+  @GetMapping public Map<String,Object> get(HttpServletRequest req) {
+    return Map.of("success", true, "rules", policy.get(AuthInterceptor.current(req).id()), "note", "Only authorised human owners can change these guardrails.");
   }
 
   @PutMapping public Map<String,Object> update(@RequestBody Map<String,Object> body, HttpServletRequest req) {
-    Map<String,Object> before = policy.get();
-    Map<String,Object> after = policy.update(body);
-    audit.record(AuditLog.ActorType.HUMAN, AuthInterceptor.current(req).id(), "AGENT_RULES_CHANGED", Map.of("previous", before), after);
+    String ownerId = AuthInterceptor.current(req).id();
+    Map<String,Object> before = policy.get(ownerId);
+    Map<String,Object> after = policy.update(ownerId, body);
+    audit.record(AuditLog.ActorType.HUMAN, ownerId, "AGENT_RULES_CHANGED", Map.of("previous", before), after);
     return Map.of("success", true, "rules", after, "message", "Human rules saved. The agent will follow them on the next stock check.");
   }
 }

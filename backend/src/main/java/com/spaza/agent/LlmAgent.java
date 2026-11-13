@@ -15,6 +15,7 @@ import com.spaza.model.Product;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -29,7 +30,7 @@ public class LlmAgent {
   private final ModelClient model;
   private final AgentGateway gateway;
   private final MandateReader mandates;
-  private final Supplier<List<Product>> inventory;
+  private final Function<String,List<Product>> inventory;   // owner id -> that shop's stock
   private final GroupOrderService orders;
   private final SupplierRegistry suppliers;
   private final AuditLog audit;
@@ -38,6 +39,11 @@ public class LlmAgent {
   private final Map<String,Integer> runsToday = new HashMap<>();
 
   public LlmAgent(ModelClient model, AgentGateway gateway, MandateReader mandates, Supplier<List<Product>> inventory, GroupOrderService orders,
+                  SupplierRegistry suppliers, AuditLog audit, Clock clock) {
+    this(model, gateway, mandates, (Function<String,List<Product>>) owner -> inventory.get(), orders, suppliers, audit, clock);
+  }
+
+  public LlmAgent(ModelClient model, AgentGateway gateway, MandateReader mandates, Function<String,List<Product>> inventory, GroupOrderService orders,
                   SupplierRegistry suppliers, AuditLog audit, Clock clock) {
     this.model = model; this.gateway = gateway; this.mandates = mandates; this.inventory = inventory; this.orders = orders;
     this.suppliers = suppliers; this.audit = audit; this.clock = clock;
@@ -149,7 +155,7 @@ public class LlmAgent {
   private String context(String ownerId, String instruction, String source) {
     Map<String,Object> ctx = new LinkedHashMap<>();
     ctx.put("trigger", Map.of("source", source, "instruction", instruction));
-    ctx.put("inventory", inventory.get().stream().map(p -> Map.of("product", p.getName(), "stock", p.getQty(), "reorderLevel", p.getLowStock())).toList());
+    ctx.put("inventory", inventory.apply(ownerId).stream().map(p -> Map.of("product", p.getName(), "stock", p.getQty(), "reorderLevel", p.getLowStock())).toList());
     Map<String,Object> m = new LinkedHashMap<>(mandates.snapshot(ownerId).orElse(Map.of()));
     m.remove("ownerId"); m.remove("updatedBy");
     ctx.put("mandate", m);

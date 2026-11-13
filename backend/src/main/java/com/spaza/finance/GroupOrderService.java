@@ -7,6 +7,7 @@ import com.spaza.finance.GroupOrder.ShareStatus;
 import com.spaza.finance.GroupOrder.Status;
 import com.spaza.finance.MandateService.HumanActor;
 import com.spaza.finance.MandateService.PaymentRequest;
+import com.spaza.persistence.StateStore;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -21,7 +22,8 @@ import java.util.function.Consumer;
  *  - At the approval deadline, if the supplier minimum is not met the order is cancelled and every escrow refunded.
  *  - When every funded member confirms delivery, all escrows are released directly to the supplier.
  *  - If delivery is not confirmed by the delivery deadline, every escrow is refunded to its member.
- * Orders are held in memory (they reset when the server restarts); the audit log is persisted.
+ * Orders are kept in memory for speed and written to the state store on every change (kind "group-order"), then
+ * reloaded at startup, so a restart never loses an order, its escrow references or its timeline.
  */
 public class GroupOrderService {
   public record MemberLine(String ownerId, String ownerName, int quantity) {}
@@ -36,11 +38,25 @@ public class GroupOrderService {
   private final Duration deliveryWindow;
   private final Map<String,GroupOrder> orders = new LinkedHashMap<>();
   private final List<Consumer<GroupOrder>> completionListeners = new ArrayList<>();
+  private final StateStore store;
   private int sequence = 1000;
+  static final String KIND = "group-order";
 
   public GroupOrderService(MandateService mandates, SupplierRegistry suppliers, SimulatedXrplLedger ledger, AuditLog audit, Clock clock, Duration deliveryWindow) {
-    this.mandates = mandates; this.suppliers = suppliers; this.ledger = ledger; this.audit = audit; this.clock = clock; this.deliveryWindow = deliveryWindow;
+    this(mandates, suppliers, ledger, audit, clock, deliveryWindow, StateStore.memory());
   }
+
+  public GroupOrderService(MandateService mandates, SupplierRegistry suppliers, SimulatedXrplLedger ledger, AuditLog audit, Clock clock, Duration deliveryWindow,
+                           StateStore store) {
+    this.mandates = mandates; this.suppliers = suppliers; this.ledger = ledger; this.audit = audit; this.clock = clock; this.deliveryWindow = deliveryWindow;
+    this.store = store;
+    store.loadAll(KIND, GroupOrderState.class).stream().sorted(Comparator.comparingInt(GroupOrderState::number)).forEach(st -> {
+      orders.put(st.id(), st.toOrder());
+      sequence = Math.max(sequence, st.number());
+    });
+  }
+
+  private void persist(GroupOrder o) { store.save(KIND, o.id, GroupOrderState.of(o)); }
 
   public void onCompleted(Consumer<GroupOrder> listener) { completionListeners.add(listener); }
 
@@ -357,6 +373,7 @@ public class GroupOrderService {
   private void event(GroupOrder o, ActorType type, String actor, String action, Map<String,?> in, Map<String,?> out) {
     Map<String,Object> inputs = new LinkedHashMap<>(in); inputs.put("orderId", o.id);
     var entry = audit.record(type, actor, action, inputs, out);
-    o.timeline.add(Map.of("at", entry.getTimestamp(), "actor", type + ":" + actor, "action", action, "auditSeq", entry.getSeq()));
+    o.timeline.add(Map.of("at", String.valueOf(entry.getTimestamp()), "actor", type + ":" + actor, "action", action, "auditSeq", entry.getSeq()));
+    persist(o);   // every change to an order is followed by an event, so this writes each new state through
   }
 }
