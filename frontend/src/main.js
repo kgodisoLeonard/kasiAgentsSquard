@@ -1,3 +1,5 @@
+import { renderStudio } from './kasi/studio.js';
+import { t,langOptions,setLang } from './kasi/languages.js';
 import './styles.css';
 import { api } from './api.js';
 import { icons, loader, errorBox, applyTheme, toggleTheme } from './ui.js';
@@ -17,6 +19,7 @@ applyTheme();
 try { user = JSON.parse(localStorage.getItem('spaza_user') || 'null'); }
 catch { localStorage.removeItem('spaza_user'); }
 const ownerRoutes = {
+  studio: { label: '✨ Kasi AI Studio', title: 'Kasi AI Studio', sub: 'Multilingual business intelligence and owner-approved actions.', render: renderStudio },
   dashboard: { label: 'Dashboard', title: 'Good day, Thandi 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
   marketplace: { label: 'Marketplace', title: 'Supplier Marketplace', sub: 'Choose verified products and place stock orders.', render: renderMarketplace },
   agent: { label: 'Group Buys', title: 'AI Group Buying', sub: 'Your agent spots shortages and pools orders with nearby shops.', render: renderAgent },
@@ -52,7 +55,7 @@ document.getElementById('app').innerHTML = `
         <button class="close-btn" id="menu-close" aria-label="Close menu">✕</button>
       </div>
       <nav class="nav"><div class="nav-label">Menu</div>${navButtons()}</nav>
-      <div class="sidebar-foot">
+      <div class="sidebar-foot"><label for="global-kasi-lang">🌍 Language</label><select id="global-kasi-lang" class="input" aria-label="Language">${langOptions()}</select>
         <div><span class="status-dot" id="api-dot"></span><span id="api-status">Checking API…</span></div>
         <div style="margin-top:6px;color:var(--dim)">XRPL Testnet · RLUSD</div>
         <button class="btn btn-ghost btn-block" id="theme-toggle" style="margin-top:14px" type="button"></button>
@@ -67,11 +70,13 @@ document.getElementById('app').innerHTML = `
       <section id="content"></section>
     </main>
   </div>
-  <nav class="mobile-nav">${navButtons('m', ['dashboard', 'marketplace', 'agent', 'wallet'])}
+  <nav class="mobile-nav">${navButtons('m', ['dashboard', 'studio', 'marketplace', 'wallet'])}
     <button class="nav-btn m" id="more-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>More</span></button>
   </nav>
 `;
 
+document.getElementById('global-kasi-lang').addEventListener('change', ev => setLang(ev.target.value));
+window.addEventListener('kasi-language-change', () => { document.getElementById('global-kasi-lang').value = localStorage.getItem('kasi_lang'); showTab(location.hash.slice(1) || 'dashboard'); });
 const sidebar = document.getElementById('sidebar');
 const overlay = document.getElementById('overlay');
 function setMenu(open) {
@@ -101,7 +106,7 @@ async function showTab(id) {
   }
   const r = routes[id];
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === id));
-  document.getElementById('page-title').textContent = r.title;
+  document.getElementById('page-title').textContent = id === 'studio' ? t('assistant') : r.title;
   document.getElementById('page-sub').textContent = r.sub;
   document.title = `${r.label} · Spaza to the World`;
   const token = ++renderToken;

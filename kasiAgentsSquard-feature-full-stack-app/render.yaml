@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: spaza-to-the-world
-    runtime: docker
-    plan: free
-    healthCheckPath: /api/health
-    autoDeploy: true

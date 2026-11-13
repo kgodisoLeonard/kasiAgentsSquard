@@ -473,3 +473,6 @@ body.no-scroll { overflow: hidden; }
   .mobile-header h1 { font-size: 15px; }
 }
 
+
+/* KasiLingo AI Studio */
+.kasi-metric{font-size:36px;font-weight:800;margin:12px 0}.kasi-metric small{font-size:14px;font-weight:500}.kasi-list{display:grid;gap:10px;margin:14px 0;max-height:230px;overflow:auto}.kasi-list .row,.kasi-offer{padding:10px;border:1px solid var(--border);border-radius:10px}.kasi-chat{height:245px;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:14px;margin:12px 0}.kasi-bubble{padding:12px 14px;border-radius:14px;max-width:88%;line-height:1.5;overflow-wrap:anywhere}.kasi-bubble.bot{background:var(--card);border:1px solid var(--border);align-self:flex-start}.kasi-bubble.user{background:var(--primary);color:white;align-self:flex-end}.kasi-form{display:flex;gap:8px}.kasi-form input{min-width:0;flex:1}.kasi-result{margin-top:12px;padding:14px;border:1px solid var(--border);border-radius:12px;line-height:1.6}.card label{display:block;margin-top:12px}.card label .input{display:block;width:100%;margin-top:6px}@media(max-width:600px){.kasi-form{flex-direction:column}}
