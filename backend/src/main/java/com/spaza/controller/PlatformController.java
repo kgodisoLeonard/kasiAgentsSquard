@@ -1,7 +1,11 @@
 package com.spaza.controller;
 
 import com.spaza.model.Product;
+import com.spaza.model.AppUser;
+import com.spaza.model.SupplierRating;
+import com.spaza.repository.AppUserRepository;
 import com.spaza.repository.InMemoryStore;
+import com.spaza.repository.SupplierRatingRepository;
 import org.springframework.web.bind.annotation.*;
 import java.time.*;
 import java.util.*;
@@ -11,6 +15,8 @@ import java.util.*;
 @RequestMapping("/api/platform")
 public class PlatformController {
   private final InMemoryStore store;
+  private final AppUserRepository users;
+  private final SupplierRatingRepository ratings;
   private final List<Map<String,Object>> audit = Collections.synchronizedList(new ArrayList<>());
   private final List<Map<String,Object>> suppliers = Collections.synchronizedList(new ArrayList<>(List.of(
     new LinkedHashMap<>(Map.of("id","SUP-001","name","Mokoena Meats","country","South Africa","verified",true,"rating",4.8,"deliveryDays",1,"product","Minced Meat","price",65.0,"minOrder",50)),
@@ -18,8 +24,8 @@ public class PlatformController {
   )));
   private final List<Map<String,Object>> orders = Collections.synchronizedList(new ArrayList<>());
 
-  public PlatformController(InMemoryStore store) {
-    this.store = store;
+  public PlatformController(InMemoryStore store, AppUserRepository users, SupplierRatingRepository ratings) {
+    this.store = store; this.users = users; this.ratings = ratings;
     Map<String,Object> initial=order("ORD-2026-0412", "Mokoena Meats", "Minced Meat", 20, 65.0, "SUPPLIER_REVIEW", "Thandi Mokone"); initial.put("createdBy","Spaza Finance Agent"); initial.put("reason","Low-stock group-buy recommendation"); orders.add(initial);
   }
 
@@ -30,6 +36,31 @@ public class PlatformController {
       "stokvel",Map.of("name","Mamelodi Central Buying Club","members",5,"splitMethod","By quantity","sharedGuarantee",false));
   }
   @GetMapping("/suppliers") public Map<String,Object> suppliers() { return Map.of("success",true,"suppliers",suppliers); }
+  @GetMapping("/directory") public Map<String,Object> directory() {
+    List<Map<String,Object>> supplierDirectory = new ArrayList<>();
+    suppliers.forEach(s -> supplierDirectory.add(supplierView(String.valueOf(s.get("id")), String.valueOf(s.get("name")), String.valueOf(s.getOrDefault("country", "South Africa")), true, s)));
+    users.findAll().stream().filter(u -> "SUPPLIER".equals(u.getRole())).forEach(u -> {
+      if (supplierDirectory.stream().noneMatch(s -> String.valueOf(s.get("businessName")).equalsIgnoreCase(u.getBusinessName()))) supplierDirectory.add(supplierView(u.getId(), u.getBusinessName(), "South Africa", u.isVerified(), Map.of()));
+    });
+    List<Map<String,Object>> spazaDirectory = users.findAll().stream().filter(u -> "OWNER".equals(u.getRole())).map(this::spazaView).toList();
+    return Map.of("success",true,"suppliers",supplierDirectory,"spazas",spazaDirectory);
+  }
+  @PostMapping("/suppliers/{supplierId}/ratings") public synchronized Map<String,Object> rateSupplier(@PathVariable String supplierId, @RequestBody Map<String,Object> input) {
+    String orderId=String.valueOf(input.getOrDefault("orderId", ""));
+    String ownerId=String.valueOf(input.getOrDefault("ownerId", "owner-demo"));
+    int rating=((Number)input.getOrDefault("rating", 0)).intValue();
+    String comment=String.valueOf(input.getOrDefault("comment", "")).trim();
+    if (rating < 1 || rating > 5) throw new IllegalArgumentException("Rating must be between 1 and 5 stars");
+    if (orderId.isBlank()) throw new IllegalArgumentException("A delivered order is required before rating a supplier");
+    if (ratings.findBySupplierIdAndOrderId(supplierId, orderId).isPresent()) throw new IllegalStateException("This delivered order has already been rated");
+    Map<String,Object> order=orders.stream().filter(o -> orderId.equals(o.get("id"))).findFirst().orElseThrow(() -> new NoSuchElementException("Order not found"));
+    if (!"DELIVERED".equals(order.get("status"))) throw new IllegalStateException("Only delivered orders can be rated");
+    AppUser owner=users.findById(ownerId).orElse(null);
+    String ownerName=owner == null ? String.valueOf(order.getOrDefault("owner", "Spaza owner")) : owner.getName();
+    String supplierName=String.valueOf(order.get("supplier"));
+    SupplierRating saved=ratings.save(new SupplierRating(UUID.randomUUID().toString(), supplierId, supplierName, ownerId, ownerName, orderId, rating, comment));
+    return Map.of("success",true,"rating",ratingView(saved),"message","Supplier rating saved");
+  }
   @GetMapping("/notifications") public Map<String,Object> notifications() {
     List<Map<String,Object>> notices = new ArrayList<>();
     for (Product p : store.findAll()) {
@@ -90,6 +121,14 @@ public class PlatformController {
   }
   @GetMapping("/audit") public Map<String,Object> getAudit() { return Map.of("success",true,"events",audit); }
   private void log(String type,String detail) { audit.add(0,Map.of("type",type,"detail",detail,"at",Instant.now().toString(),"actor","Thandi Mokone")); }
+  private Map<String,Object> supplierView(String id, String businessName, String country, boolean verified, Map<String,Object> offer) {
+    List<SupplierRating> entries=ratings.findBySupplierIdOrderByCreatedAtDesc(id);
+    double average=entries.stream().mapToInt(SupplierRating::getRating).average().orElse(offer.get("rating") instanceof Number ? ((Number)offer.get("rating")).doubleValue() : 0);
+    Map<String,Object> view=new LinkedHashMap<>(); view.put("id",id); view.put("businessName",businessName); view.put("name",businessName); view.put("country",country); view.put("verified",verified); view.put("rating",Math.round(average*10)/10.0); view.put("ratingCount",entries.size()); view.put("reviews",entries.stream().map(this::ratingView).toList());
+    offer.forEach(view::put); return view;
+  }
+  private Map<String,Object> spazaView(AppUser user) { return Map.of("id",user.getId(),"name",user.getName(),"businessName",user.getBusinessName(),"verified",user.isVerified(),"role",user.getRole()); }
+  private Map<String,Object> ratingView(SupplierRating rating) { return Map.of("id",rating.getId(),"supplierId",rating.getSupplierId(),"supplierName",rating.getSupplierName(),"ownerName",rating.getOwnerName(),"orderId",rating.getOrderId(),"rating",rating.getRating(),"comment",rating.getComment() == null ? "" : rating.getComment(),"createdAt",rating.getCreatedAt().toString()); }
   private Map<String,Object> order(String id,String supplier,String product,int quantity,double price,String status,String owner) {
     Map<String,Object> o=new LinkedHashMap<>(); o.put("id",id); o.put("owner",owner); o.put("supplier",supplier); o.put("product",product); o.put("quantity",quantity); o.put("unitPrice",price); o.put("total",quantity*price); o.put("escrow","HELD"); o.put("status",status); o.put("createdAt",Instant.now().toString()); return o;
   }
