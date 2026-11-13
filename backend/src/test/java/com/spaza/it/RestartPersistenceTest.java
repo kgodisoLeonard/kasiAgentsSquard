@@ -48,6 +48,7 @@ class RestartPersistenceTest {
       token = thandi.token();
       assertTrue(agentSpent > 0);
       assertEquals(200, thandi.put("/human/rules", Map.of("warningThreshold", 12, "autoOrderThreshold", 4, "autoOrderEnabled", true)).status());
+      assertEquals(200, new Api(port(first)).login("Ubuntu Foods Co-op", "supplier123").put("/supplier/prices", Map.of("product", "Maize Meal (10kg)", "unitPrice", 79.00)).status());
     } finally { first.close(); }
 
     ConfigurableApplicationContext second = start();
@@ -56,6 +57,8 @@ class RestartPersistenceTest {
       assertEquals(200, thandi.get("/pos/inventory").status(), "signed-in session survives a restart");
       assertEquals(breadAfterSale, FeatureApiTest.product(thandi, BREAD).get("qty").asInt(), "stock survives");
       assertEquals(4, thandi.get("/human/rules").body().get("rules").get("autoOrderThreshold").asInt(), "Human Rules survive");
+      assertEquals(79.00, SupplierPricesTest.priceOf(new Api(port(second)).login("Ubuntu Foods Co-op", "supplier123"), "Maize Meal (10kg)").get("unitPrice").asDouble(), 0.001,
+          "supplier price changes survive");
       assertEquals(salesCount, thandi.get("/pos/sales").body().get("count").asInt(), "sales survive");
       assertEquals(agentSpent, thandi.get("/mandates").body().get("mandate").get("agentSpentThisMonth").asDouble(), 0.001, "agent budget use survives");
       assertEquals(balance, thandi.get("/xrpl/status").body().get("rlusdBalance").asDouble(), 0.001, "wallet balance survives");

@@ -535,3 +535,10 @@ pre.result { white-space: pre-wrap; word-break: break-word; font-size: 12px; max
 /* Till: income from paid orders */
 .income-row { padding: 10px 12px; margin-bottom: 14px; border-radius: 10px; background: var(--primary-soft); }
 .income-row b { color: var(--primary); }
+
+/* Supplier price list */
+.price-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; }
+.price-row { display: grid; grid-template-columns: 1fr 110px auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+.price-row .input { padding: 7px 10px; }
+.price-add { display: grid; grid-template-columns: 1fr 140px auto; gap: 8px; margin-top: 12px; }
+@media (max-width: 520px) { .price-add, .price-row { grid-template-columns: 1fr; } }

@@ -29,7 +29,15 @@ public class FinanceConfig {
     return new SupplierRegistry(new com.spaza.persistence.Ttl<>(Duration.ofSeconds(30), users::findAll), store);
   }
 
-  @Bean SupplierCatalog supplierCatalog() { return new SupplierCatalog(); }
+  /** Price lists in the supplier_prices table; edits are saved straight away (they are rare and must not be lost). */
+  @Bean SupplierCatalog supplierCatalog(com.spaza.repository.SupplierPriceRepository prices) {
+    return new SupplierCatalog(new SupplierCatalog.Store() {
+      @Override public List<SupplierCatalog.Item> load() {
+        return prices.findAll().stream().map(p -> new SupplierCatalog.Item(p.getSupplierId(), p.getProduct(), p.getUnitPrice())).toList();
+      }
+      @Override public void save(SupplierCatalog.Item i) { prices.save(new com.spaza.model.SupplierPrice(i.supplierId(), i.product(), i.unitPrice())); }
+    });
+  }
 
   /** Google AI Studio (Gemini). Key from the GEMINI_API_KEY environment variable; never committed. */
   @Bean com.spaza.agent.ModelClient modelClient(@Value("${spaza.llm.api-key:}") String key, @Value("${spaza.llm.model:gemini-flash-latest}") String model,
