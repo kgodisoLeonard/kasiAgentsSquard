@@ -28,6 +28,16 @@ export const errorBox = (msg) => `
 
 const EMOJI = { 'Meat & Poultry': '🥩', Bakery: '🍞', Dairy: '🥛', Staples: '🌽', Beverages: '🥤', Snacks: '🍿', Household: '🧼' };
 export const emojiFor = (cat) => EMOJI[cat] || '📦';
+export const productImage = (name = '') => {
+  const n = name.toLowerCase();
+  if (n.includes('meat')) return 'img-meat';
+  if (n.includes('milk')) return 'img-milk';
+  if (n.includes('coca')) return 'img-cola';
+  if (n.includes('dish')) return 'img-dish';
+  if (n.includes('tea')) return 'img-tea';
+  if (n.includes('maize')) return n.includes('2.5') ? 'img-maize-small' : 'img-maize';
+  return 'img-bread';
+};
 
 export const icons = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',

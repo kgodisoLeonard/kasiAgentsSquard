@@ -1,4 +1,4 @@
-import { esc, money, toast } from '../ui.js';
+import { esc, money, toast, productImage } from '../ui.js';
 
 export async function renderMarketplace(root, api, alive) {
   const [supplierData, orderData] = await Promise.all([api.suppliers(), api.orders()]);
@@ -9,7 +9,7 @@ export async function renderMarketplace(root, api, alive) {
   const $ = selector => root.querySelector(selector);
   const offerKey = s => `${s.id}:${s.product}`;
   const draw = () => {
-    $('#offers').innerHTML = offers.map(s => { const key = offerKey(s), selected = basket.get(key); return `<div class="product ${selected ? 'low' : ''}" data-offer="${esc(key)}"><div class="emoji">📦</div><div class="name">${esc(s.product)}</div><div class="meta">${esc(s.name)} · ${esc(s.country)}</div><div class="foot"><span class="price">${money(s.price)}/kg</span><span class="stock">Min ${s.minOrder}kg</span></div><div class="field" style="margin-top:8px"><label>Quantity (kg)</label><input class="input" data-qty="${esc(key)}" type="number" min="${s.minOrder}" value="${selected || s.minOrder}"></div><button class="btn ${selected ? 'btn-primary' : 'btn-ghost'} btn-block btn-sm" data-select="${esc(key)}">${selected ? 'Selected' : 'Select product'}</button></div>`; }).join('');
+    $('#offers').innerHTML = offers.map(s => { const key = offerKey(s), selected = basket.get(key); return `<div class="product ${selected ? 'low' : ''}" data-offer="${esc(key)}"><div class="product-image ${productImage(s.product)}" role="img" aria-label="${esc(s.product)}"></div><div class="name">${esc(s.product)}</div><div class="meta">${esc(s.name)} · ${esc(s.country)}</div><div class="foot"><span class="price">${money(s.price)}/kg</span><span class="stock">Min ${s.minOrder}kg</span></div><div class="field" style="margin-top:8px"><label>Quantity (kg)</label><input class="input" data-qty="${esc(key)}" type="number" min="${s.minOrder}" value="${selected || s.minOrder}"></div><button class="btn ${selected ? 'btn-primary' : 'btn-ghost'} btn-block btn-sm" data-select="${esc(key)}">${selected ? 'Selected' : 'Select product'}</button></div>`; }).join('');
     const items = [...basket.entries()].map(([key, qty]) => ({ offer: offers.find(s => offerKey(s) === key), qty }));
     $('#basket').innerHTML = items.length ? items.map(({ offer, qty }) => `<div class="row"><span>${esc(offer.product)}<br><small>${qty}kg · ${money(offer.price)}/kg</small></span><b class="mono">${money(qty * offer.price)}</b></div>`).join('') : '<div class="empty">Select products to start an order.</div>';
     $('#basket-count').textContent = `${items.length} product${items.length === 1 ? '' : 's'}`;
