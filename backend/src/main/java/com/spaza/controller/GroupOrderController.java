@@ -113,6 +113,15 @@ public class GroupOrderController {
   @PostMapping("/{id}/supplier-action") @RequireRole("SUPPLIER")
   public Map<String,Object> supplierAction(@PathVariable String id, @RequestBody Map<String,Object> body, HttpServletRequest req) {
     AuthUser u = AuthInterceptor.current(req);
+    if ("DECLINE".equalsIgnoreCase(String.valueOf(body.get("action")))) {
+      Optional<GroupOrder> next = orders.supplierDecline(id, u.id(), String.valueOf(body.getOrDefault("reason", "")));
+      Map<String,Object> r = new LinkedHashMap<>();
+      r.put("success", true); r.put("order", orders.view(orders.find(id).orElseThrow(), u.id()));
+      r.put("redirectedTo", next.map(GroupOrder::id).orElse(null));
+      r.put("message", next.map(n -> "Declined. Buyers were refunded and the order moved to " + orders.view(n, null).get("supplierName") + " (" + n.id() + ").")
+          .orElse("Declined. Buyers were refunded; no other verified supplier has enough stock."));
+      return r;
+    }
     GroupOrder o = orders.supplierAction(id, u.id(), String.valueOf(body.get("action")));
     return Map.of("success", true, "order", orders.view(o, u.id()));
   }

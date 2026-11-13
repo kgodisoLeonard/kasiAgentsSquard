@@ -31,7 +31,7 @@ public class AgentGateway {
       + "cases to a human. Every action you take is logged.";
 
   /** The allow-list. Nothing outside this enum can be executed. */
-  public enum Action { DETECT_SHORTAGES, RECOMMEND_SUPPLIER, NOTIFY, DRAFT_GROUP_ORDER, EXECUTE_APPROVED_PAYMENT, READ_MANDATE, PLACE_RESTOCK_ORDER }
+  public enum Action { DETECT_SHORTAGES, RECOMMEND_SUPPLIER, NOTIFY, DRAFT_GROUP_ORDER, EXECUTE_APPROVED_PAYMENT, READ_MANDATE, PLACE_RESTOCK_ORDER, APPROVE_GROUP_SHARE }
 
   /** Known dangerous requests get a specific refusal reason (everything not allow-listed is refused regardless). */
   private static final Map<String,String> EXPLICIT_DENIALS = Map.ofEntries(
@@ -109,6 +109,7 @@ public class AgentGateway {
         }
         case READ_MANDATE -> readMandate(onBehalfOf);
         case PLACE_RESTOCK_ORDER -> restock(str(p, "product"), onBehalfOf);
+        case APPROVE_GROUP_SHARE -> approveShare(str(p, "orderId"), onBehalfOf);
       };
       Map<String,Object> out = new LinkedHashMap<>(); out.put("allowed", true); out.put("action", action.name()); out.put("result", result);
       if (!untrusted.isEmpty()) out.put("untrustedInput", untrusted);
@@ -198,6 +199,18 @@ public class AgentGateway {
     Optional<SupplierCatalog.Item> price = catalog.price(supplierId, item.getName());
     BigDecimal max = new BigDecimal(String.valueOf(rule.get("maxUnitPrice")));
     if (price.isEmpty()) return escalate(result, ownerId, "NO_PRICE", "Supplier " + supplierId + " has no price for " + item.getName() + ". Please choose another supplier.");
+    if (!price.get().hasStock(qty)) {
+      // The rule's supplier cannot supply this much: use another supplier the owner approved, within the price limit.
+      Set<String> allowed = new HashSet<>((List<String>) mandate.getOrDefault("allowedSuppliers", List.of()));
+      String from = supplierId; int have = price.get().stock() == null ? 0 : price.get().stock();
+      Optional<SupplierCatalog.Item> alt = catalog.alternative(item.getName(), qty, Set.of(supplierId), i -> allowed.contains(i.supplierId())
+          && i.unitPrice().compareTo(max) <= 0 && suppliers.find(i.supplierId()).map(SupplierRegistry.SupplierInfo::canReceiveOrders).orElse(false));
+      if (alt.isEmpty())
+        return escalate(result, ownerId, "OUT_OF_STOCK", supplierName(from) + " only has " + have + " " + item.getName() + " and no approved supplier within your R"
+            + max.toPlainString() + " limit has " + qty + ". Not ordered.");
+      result.put("redirectedFrom", from);
+      supplierId = alt.get().supplierId(); price = alt;
+    }
     if (price.get().unitPrice().compareTo(max) > 0)
       return escalate(result, ownerId, "PRICE_ABOVE_LIMIT", item.getName() + " costs R" + price.get().unitPrice().toPlainString() + " but your limit is R" + max.toPlainString() + ". Not ordered.");
     AppUser owner = owners.apply(ownerId).orElseThrow(() -> new IllegalStateException("Owner not found"));
@@ -211,6 +224,27 @@ public class AgentGateway {
     notify(ownerId, paid
         ? "Agent ordered " + qty + " x " + item.getName() + " from " + suppliers.find(supplierId).map(SupplierRegistry.SupplierInfo::name).orElse(supplierId) + " for R" + share.total().toPlainString() + " (held in escrow until you confirm delivery). Order " + o.id() + "."
         : "Agent could not pay for " + item.getName() + " restock (order " + o.id() + "): " + share.blockedReason() + ". You can approve it under Group Orders.");
+    return result;
+  }
+
+  private String supplierName(String id) { return suppliers.find(id).map(SupplierRegistry.SupplierInfo::name).orElse(id); }
+
+  /**
+   * Approve a member's share of a group order on the member's behalf. Human Rules come first: if the owner switched
+   * automatic ordering off, the agent leaves the share for the owner. Otherwise the payment goes through the owner's
+   * full mandate check (approved suppliers, caps, daily limit, the agent's monthly budget) before any escrow.
+   */
+  private Map<String,Object> approveShare(String orderId, String ownerId) {
+    Map<String,Object> result = new LinkedHashMap<>(); result.put("orderId", orderId);
+    HumanRules rules = humanRules.apply(ownerId);
+    if (!rules.autoOrderEnabled()) {
+      result.put("status", "HELD_BY_HUMAN_RULES"); result.put("reason", "Automatic ordering is switched off in your Human Rules: approve it yourself.");
+      return result;
+    }
+    AppUser owner = owners.apply(ownerId).orElseThrow(() -> new IllegalStateException("Owner not found"));
+    GroupOrder.Share s = orders.agentApproveShare(orderId, ownerId, owner.isVerified(), AGENT_ID);
+    result.put("status", s.status().name()); result.put("amount", s.total());
+    if (s.blockedReason() != null) result.put("reason", s.blockedReason());
     return result;
   }
 

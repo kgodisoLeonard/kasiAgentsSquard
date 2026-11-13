@@ -33,9 +33,10 @@ public class FinanceConfig {
   @Bean SupplierCatalog supplierCatalog(com.spaza.repository.SupplierPriceRepository prices) {
     return new SupplierCatalog(new SupplierCatalog.Store() {
       @Override public List<SupplierCatalog.Item> load() {
-        return prices.findAll().stream().map(p -> new SupplierCatalog.Item(p.getSupplierId(), p.getProduct(), p.getUnitPrice())).toList();
+        return prices.findAll().stream().map(p -> new SupplierCatalog.Item(p.getSupplierId(), p.getProduct(), p.getUnitPrice(), p.getStock())).toList();
       }
-      @Override public void save(SupplierCatalog.Item i) { prices.save(new com.spaza.model.SupplierPrice(i.supplierId(), i.product(), i.unitPrice())); }
+      @Override public void save(SupplierCatalog.Item i) { prices.save(new com.spaza.model.SupplierPrice(i.supplierId(), i.product(), i.unitPrice(), i.stock())); }
+      @Override public void delete(SupplierCatalog.Item i) { prices.deleteById(com.spaza.model.SupplierPrice.key(i.supplierId(), i.product())); }
     });
   }
 
@@ -62,8 +63,10 @@ public class FinanceConfig {
   }
 
   @Bean GroupOrderService groupOrderService(MandateService mandates, SupplierRegistry suppliers, SimulatedXrplLedger ledger, AuditLog audit, Clock clock,
-                                            InventoryService inventory, StateStore store, @Value("${spaza.delivery-window-hours:48}") long deliveryHours) {
+                                            InventoryService inventory, StateStore store, SupplierCatalog catalog,
+                                            @Value("${spaza.delivery-window-hours:48}") long deliveryHours) {
     GroupOrderService service = new GroupOrderService(mandates, suppliers, ledger, audit, clock, Duration.ofHours(deliveryHours), store);
+    service.useCatalog(catalog);   // stock checks, redirects and reservations
     // When escrow is released, each buyer's delivered quantity goes into that buyer's own shop.
     service.onCompleted(order -> order.shares().stream().filter(s -> s.status() == GroupOrder.ShareStatus.RELEASED)
         .forEach(s -> inventory.receive(s.ownerId(), order.product(), s.quantity())));
@@ -80,7 +83,16 @@ public class FinanceConfig {
                                   AgentProfileRepository agents, AuditLog audit, SupplierCatalog catalog, AppUserRepository users, StateStore store, Clock clock,
                                   com.spaza.repository.AgentPolicy humanRules) {
     MandateReader readOnly = mandates::snapshot;
-    return new AgentGateway(readOnly, orders, suppliers, shopStock(inventory),
+    AgentGateway gateway = new AgentGateway(readOnly, orders, suppliers, shopStock(inventory),
         agentEnabled(agents)::get, audit, catalog, users::findById, store, clock, humanRules::rules);
+    // When a group order is drafted, the agent approves each member's share in the background (Human Rules + mandate apply).
+    java.util.concurrent.ExecutorService approvals = java.util.concurrent.Executors.newSingleThreadExecutor(r -> { Thread t = new Thread(r, "agent-approvals"); t.setDaemon(true); return t; });
+    orders.onEvent(e -> {
+      if (!"GROUP_ORDER_DRAFTED".equals(e.action())) return;
+      List<String> members = e.order().shares().stream().filter(s -> s.status() == GroupOrder.ShareStatus.PENDING).map(GroupOrder.Share::ownerId).toList();
+      String orderId = e.order().id();
+      approvals.submit(() -> members.forEach(m -> gateway.execute("APPROVE_GROUP_SHARE", java.util.Map.of("orderId", orderId), m)));
+    });
+    return gateway;
   }
 }

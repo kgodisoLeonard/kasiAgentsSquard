@@ -61,7 +61,7 @@ class ConnectedShopsTest {
     assertTrue(new Api(port).login(unverified.get("businessName").asText(), "supplier123").get("/supplier/prices").status() == 200, "the unverified supplier can sign in");
   }
 
-  @Test void aGroupOrderFlowsThroughEveryConnectedShop() {
+  @Test void aGroupOrderFlowsThroughEveryConnectedShop() throws InterruptedException {
     Map<String,Api> shop = new LinkedHashMap<>();
     for (String s : NEW_SHOPS) shop.put(s, owner(s));
     Api lerato = shop.get("Lerato's Tuck Shop");
@@ -69,8 +69,8 @@ class ConnectedShopsTest {
     Map<String,Integer> sugarBefore = new HashMap<>();
     shop.forEach((n, a) -> sugarBefore.put(n, FeatureApiTest.product(a, SUGAR).get("qty").asInt()));
 
-    // The demo buying club already has a shared order waiting for all four shops.
-    for (Api a : shop.values()) assertTrue(orders(a).stream().anyMatch(o -> o.get("shares").size() == 4 && o.get("status").asText().equals("COLLECTING")),
+    // The demo buying club already has a shared order for all four shops (the agent approves it within their rules).
+    for (Api a : shop.values()) assertTrue(orders(a).stream().anyMatch(o -> o.get("shares").size() == 4 && o.get("reason").asText().startsWith("Demo buying club")),
         "the seeded demo group order is shared by the four shops");
 
     // Lerato starts a group order for sugar and invites the other three.
@@ -90,17 +90,15 @@ class ConnectedShopsTest {
     }
     for (String s : NEW_SHOPS.subList(1, 4)) assertTrue(told(shop.get(s), id, "INVITED"), s + " should be told about the invitation");
 
-    // Each shop pays its own share; every other member sees it straight away.
+    // The agent pays each shop's share within its mandate and Human Rules; every member sees every payment.
+    JsonNode funded = AgentSupplierFlowTest.waitForOrder(lerato, id, o -> o.get("status").asText().equals("FUNDED"));
+    assertEquals("FUNDED", funded.get("status").asText(), "the agent approved every share: " + funded);
     for (String s : NEW_SHOPS) {
-      Api.Res paid = shop.get(s).post("/group-orders/" + id + "/approve", Map.of());
-      assertEquals(200, paid.status(), s + ": " + paid.body());
-      for (String other : NEW_SHOPS) {
-        JsonNode share = FeatureApiTest.list(order(shop.get(other), id).get("shares")).stream()
-            .filter(x -> x.get("ownerName").asText().equals(paid.body().get("order").get("yourShare").get("ownerName").asText())).findFirst().orElseThrow();
-        assertEquals("FUNDED", share.get("status").asText(), other + " should see " + s + "'s payment");
-      }
+      JsonNode seen = order(shop.get(s), id);
+      assertEquals("FUNDED", seen.get("status").asText(), s + " sees the order funded");
+      assertTrue(FeatureApiTest.list(seen.get("shares")).stream().allMatch(x -> x.get("status").asText().equals("FUNDED") && x.get("fundedBy").asText().startsWith("AGENT")),
+          s + " sees every shop's share paid by the agent");
     }
-    for (String s : NEW_SHOPS) assertEquals("FUNDED", order(shop.get(s), id).get("status").asText());
     assertTrue(told(shop.get("Kagiso General Dealer"), id, "SHARE_PAID"), "members are told when another shop pays");
     assertTrue(told(lerato, id, "ORDER_FUNDED"));
 

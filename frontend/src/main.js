@@ -59,15 +59,15 @@ const navButtons = (cls = '', only) => Object.entries(routes).filter(([id]) => !
 document.getElementById('app').innerHTML = `
   <header class="mobile-header">
     <button class="burger" id="menu-open" aria-label="Open menu" aria-expanded="false"><span></span><span></span><span></span></button>
-    <div class="brand"><div class="logo" style="width:36px;height:36px;font-size:17px">S</div><h1>Spaza to the World</h1></div>
+    <div class="brand"><div class="logo" style="width:36px;height:36px;font-size:17px">K</div><h1>Kasi Agents Squad</h1></div>
     <span class="status-dot" id="api-dot-m"></span>
   </header>
   <div class="overlay" id="overlay"></div>
   <div class="shell">
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="logo">S</div>
-        <div><h1>Spaza to the World</h1><p>Kasi Agents Squad</p></div>
+        <div class="logo">K</div>
+        <div><h1>Kasi Agents Squad</h1><p>Spaza to the World</p></div>
         <button class="close-btn" id="menu-close" aria-label="Close menu">✕</button>
       </div>
       <nav class="nav"><div class="nav-label">Menu</div>${navButtons()}</nav>
@@ -123,7 +123,7 @@ async function showTab(id) {
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === id));
   document.getElementById('page-title').textContent = id === 'studio' ? t('assistant') : r.title;
   document.getElementById('page-sub').textContent = r.sub;
-  document.title = `${r.label} · Spaza to the World`;
+  document.title = `${r.label} · Kasi Agents Squad`;
   const token = ++renderToken;
   content.innerHTML = loader();
   try {

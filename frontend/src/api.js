@@ -141,6 +141,7 @@ export const api = {
   declineShare: (id) => post(`/group-orders/${encodeURIComponent(id)}/decline`),
   confirmDelivery: (id) => post(`/group-orders/${encodeURIComponent(id)}/confirm-delivery`),
   reportNonDelivery: (id, reason) => post(`/group-orders/${encodeURIComponent(id)}/report-non-delivery`, { reason }),
+  supplierDecline: (id, reason) => post(`/group-orders/${encodeURIComponent(id)}/supplier-action`, { action: 'DECLINE', reason }),
   supplierAction: (id, action) => post(`/group-orders/${encodeURIComponent(id)}/supplier-action`, { action }),
   resolveDispute: (id, outcome, reasons) => post(`/group-orders/${encodeURIComponent(id)}/resolve`, { outcome, reasons }),
 
@@ -155,7 +156,8 @@ export const api = {
   recommendedSuppliers: () => request('/platform/suppliers/recommended'),
   myPrices: () => request('/supplier/prices'),
   updates: () => request('/platform/updates'),
-  setMyPrice: (product, unitPrice) => put('/supplier/prices', { product, unitPrice }),
+  setMyPrice: (product, unitPrice, stock) => put('/supplier/prices', { product, unitPrice, stock }),
+  deleteMyPrice: (product) => request(`/supplier/prices?product=${encodeURIComponent(product)}`, { method: 'DELETE' }),
   rateSupplier: (supplierId, body) => post(`/platform/suppliers/${encodeURIComponent(supplierId)}/ratings`, body),
   notifications: () => request('/platform/notifications'),
   ownerSuppliers: (ownerId) => request(`/platform/owners/${encodeURIComponent(ownerId)}/suppliers`),

@@ -61,7 +61,7 @@ export function productThumb(name, category, cls = '') {
 export const productImage = () => '';
 /** Group-order updates (same feed every member shop sees for its orders). */
 export function updatesList(updates) {
-  const icon = { INVITED: '📨', SHARE_PAID: '💳', SHARE_DECLINED: '✋', ORDER_FUNDED: '🔒', ACCEPTED: '👍', DISPATCHED: '🚚', DELIVERED: '📦', MEMBER_CONFIRMED: '✅', COMPLETED: '🎉', CANCELLED: '↩️', REFUNDED: '↩️', DISPUTED: '⚠️', NEW_ORDER: '🧾', PAID: '💰' };
+  const icon = { INVITED: '📨', SHARE_PAID: '💳', SHARE_DECLINED: '✋', ORDER_FUNDED: '🔒', ACCEPTED: '👍', DISPATCHED: '🚚', DELIVERED: '📦', MEMBER_CONFIRMED: '✅', COMPLETED: '🎉', CANCELLED: '↩️', REFUNDED: '↩️', DISPUTED: '⚠️', NEW_ORDER: '🧾', PAID: '💰', AGENT_APPROVED: '🤖', NEEDS_APPROVAL: '✋', REDIRECTED: '↪️', SUPPLIER_DECLINED: '⛔' };
   return updates.length ? updates.slice(0, 12).map((u) => `<div class="update-row"><span class="update-icon">${icon[u.type] || '•'}</span><span>${esc(u.message)}<br><small>${new Date(u.at).toLocaleString()}</small></span></div>`).join('')
     : '<div class="empty">No updates yet. You will see every step of your group orders here.</div>';
 }

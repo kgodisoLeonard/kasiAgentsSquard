@@ -537,10 +537,10 @@ pre.result { white-space: pre-wrap; word-break: break-word; font-size: 12px; max
 .income-row b { color: var(--primary); }
 
 /* Supplier price list */
-.price-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; }
-.price-row { display: grid; grid-template-columns: 1fr 110px auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+.price-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(520px, 1fr)); gap: 8px; max-height: 420px; overflow-y: auto; }
+.price-row { display: grid; grid-template-columns: 1fr 110px 100px auto auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
 .price-row .input { padding: 7px 10px; }
-.price-add { display: grid; grid-template-columns: 1fr 140px auto; gap: 8px; margin-top: 12px; }
+.price-add { display: grid; grid-template-columns: 1fr 120px 100px auto; gap: 8px; margin-top: 12px; }
 @media (max-width: 520px) { .price-add, .price-row { grid-template-columns: 1fr; } }
 
 /* Dashboard deliveries */
@@ -555,3 +555,6 @@ pre.result { white-space: pre-wrap; word-break: break-word; font-size: 12px; max
 .update-row:first-child { border-top: 0; }
 .update-row small { color: var(--muted); font-size: 11px; }
 .update-icon { font-size: 16px; line-height: 1.2; }
+
+.price-row .mini { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.chip.rose { color: var(--rose); background: hsla(0 70% 60% / .1); }

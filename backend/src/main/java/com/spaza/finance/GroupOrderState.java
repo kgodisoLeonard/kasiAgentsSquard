@@ -12,7 +12,7 @@ import java.util.*;
 record GroupOrderState(String id, String supplierId, String supplierName, String product, String draftedBy, String reason,
                        BigDecimal unitPrice, BigDecimal deliveryFee, int minQuantity, String approvalDeadline, String createdAt,
                        List<ShareState> shares, List<Map<String,Object>> timeline, String status, String deliveryDeadline,
-                       boolean supplierMarkedDelivered, String disputeReason, List<String> riskFlags) {
+                       boolean supplierMarkedDelivered, String disputeReason, List<String> riskFlags, boolean stockReserved) {
 
   record ShareState(String ownerId, String ownerName, int quantity, BigDecimal goods, BigDecimal delivery, String status,
                     String blockedReason, String escrowId, String decidedAt, String fundedBy, boolean deliveryConfirmed) {}
@@ -25,7 +25,7 @@ record GroupOrderState(String id, String supplierId, String supplierName, String
     }).toList();
     return new GroupOrderState(o.id, o.supplierId, o.supplierName, o.product, o.draftedBy, o.reason, o.unitPrice, o.deliveryFee, o.minQuantity,
         o.approvalDeadline.toString(), o.createdAt.toString(), shares, timeline, o.status.name(),
-        o.deliveryDeadline == null ? null : o.deliveryDeadline.toString(), o.supplierMarkedDelivered, o.disputeReason, List.copyOf(o.riskFlags));
+        o.deliveryDeadline == null ? null : o.deliveryDeadline.toString(), o.supplierMarkedDelivered, o.disputeReason, List.copyOf(o.riskFlags), o.stockReserved);
   }
 
   GroupOrder toOrder() {
@@ -40,7 +40,7 @@ record GroupOrderState(String id, String supplierId, String supplierName, String
         Instant.parse(createdAt), draftedBy, reason, list);
     o.status = Status.valueOf(status);
     o.deliveryDeadline = deliveryDeadline == null ? null : Instant.parse(deliveryDeadline);
-    o.supplierMarkedDelivered = supplierMarkedDelivered; o.disputeReason = disputeReason;
+    o.supplierMarkedDelivered = supplierMarkedDelivered; o.disputeReason = disputeReason; o.stockReserved = stockReserved;
     if (timeline != null) o.timeline.addAll(timeline);
     if (riskFlags != null) o.riskFlags.addAll(riskFlags);
     return o;

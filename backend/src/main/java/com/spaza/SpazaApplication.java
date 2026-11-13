@@ -7,6 +7,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class SpazaApplication {
     public static void main(String[] args) {
         SpringApplication.run(SpazaApplication.class, args);
-        System.out.println("\nSPAZA TO THE WORLD BACKEND (Java) running on http://localhost:8080\n");
+        System.out.println("\nKASI AGENTS SQUAD BACKEND (Java) · Spaza to the World running on http://localhost:8080\n");
     }
 }

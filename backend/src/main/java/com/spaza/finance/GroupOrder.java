@@ -31,6 +31,8 @@ public class GroupOrder {
   final BigDecimal unitPrice, deliveryFee; final int minQuantity; final Instant approvalDeadline, createdAt;
   final List<Share> shares; final List<Map<String,Object>> timeline = new ArrayList<>();
   Status status = Status.COLLECTING; Instant deliveryDeadline; boolean supplierMarkedDelivered; String disputeReason;
+  /** True when this order took units out of the supplier's stock (orders from before stock tracking did not). */
+  boolean stockReserved;
   final List<String> riskFlags = new ArrayList<>();
 
   GroupOrder(String id, String supplierId, String supplierName, String product, BigDecimal unitPrice, int minQuantity, BigDecimal deliveryFee,

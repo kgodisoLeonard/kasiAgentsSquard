@@ -11,7 +11,7 @@ public class HealthController {
     public Map<String, Object> health() {
         return Map.of(
             "status", "healthy",
-            "service", "Spaza to the World API (Java)",
+            "service", "Kasi Agents Squad API (Java) · Spaza to the World",
             "version", "1.0.0",
             "timestamp", java.time.Instant.now().toString(),
             "network", "testnet"

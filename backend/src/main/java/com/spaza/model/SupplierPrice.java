@@ -13,12 +13,15 @@ public class SupplierPrice {
   @Column(nullable = false) private String supplierId;
   @Column(nullable = false) private String product;
   @Column(nullable = false, precision = 12, scale = 2) private BigDecimal unitPrice;
+  /** Units available; null = not tracked. */
+  private Integer stock;
   @Column(nullable = false) private Instant updatedAt;
 
   protected SupplierPrice() {}
-  public SupplierPrice(String supplierId, String product, BigDecimal unitPrice) {
-    this.id = key(supplierId, product); this.supplierId = supplierId; this.product = product; this.unitPrice = unitPrice; this.updatedAt = Instant.now();
+  public SupplierPrice(String supplierId, String product, BigDecimal unitPrice, Integer stock) {
+    this.id = key(supplierId, product); this.supplierId = supplierId; this.product = product; this.unitPrice = unitPrice; this.stock = stock; this.updatedAt = Instant.now();
   }
+  public Integer getStock() { return stock; }
   public static String key(String supplierId, String product) { return supplierId + "|" + product.trim().toLowerCase(java.util.Locale.ROOT); }
   public String getSupplierId() { return supplierId; } public String getProduct() { return product; }
   public BigDecimal getUnitPrice() { return unitPrice; } public Instant getUpdatedAt() { return updatedAt; }

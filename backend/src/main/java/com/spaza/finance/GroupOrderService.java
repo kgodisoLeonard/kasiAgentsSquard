@@ -64,6 +64,10 @@ public class GroupOrderService {
   public void onCompleted(Consumer<GroupOrder> listener) { completionListeners.add(listener); }
   public void onEvent(Consumer<OrderEvent> listener) { eventListeners.add(listener); }
 
+  /** Supplier price lists with stock. When set, drafts are checked against stock, redirected if needed, and reserve stock. */
+  private SupplierCatalog catalog;
+  public void useCatalog(SupplierCatalog catalog) { this.catalog = catalog; }
+
   // ---------------------------------------------------------------- drafting
 
   public synchronized GroupOrder draft(DraftRequest r, ActorType actorType, String actorId) {
@@ -80,16 +84,35 @@ public class GroupOrderService {
     Duration window = r.approvalWindow() == null ? Duration.ofHours(24) : r.approvalWindow();
     if (window.isNegative() || window.isZero()) throw new IllegalArgumentException("Approval window must be positive");
 
-    List<Share> shares = split(r.members(), SimulatedXrplLedger.money(r.unitPrice()), fee);
+    // Not enough stock at the chosen supplier: redirect to the cheapest other verified supplier that has enough.
+    String reason = r.reason() == null ? "" : r.reason();
+    int wanted = r.members().stream().mapToInt(MemberLine::quantity).sum();
+    BigDecimal unitPrice = r.unitPrice();
+    String redirectedFrom = null;
+    if (catalog != null && catalog.price(supplier.id(), r.product()).isPresent() && !catalog.hasStock(supplier.id(), r.product(), wanted)) {
+      int have = catalog.price(supplier.id(), r.product()).map(i -> i.stock() == null ? 0 : i.stock()).orElse(0);
+      String fromName = supplier.name();
+      SupplierCatalog.Item alt = catalog.alternative(r.product(), wanted, Set.of(supplier.id()),
+              i -> suppliers.find(i.supplierId()).map(SupplierRegistry.SupplierInfo::canReceiveOrders).orElse(false))
+          .orElseThrow(() -> new IllegalStateException(fromName + " only has " + have + " " + r.product() + " in stock and no other verified supplier has " + wanted + "."));
+      redirectedFrom = supplier.name();
+      reason = (reason.isBlank() ? "" : reason + " · ") + "Redirected from " + supplier.name() + " (only " + have + " in stock)";
+      supplier = suppliers.find(alt.supplierId()).orElseThrow();
+      unitPrice = alt.unitPrice();
+    }
+    List<Share> shares = split(r.members(), SimulatedXrplLedger.money(unitPrice), fee);
     BigDecimal total = shares.stream().map(Share::total).reduce(BigDecimal.ZERO, BigDecimal::add);
     if (total.doubleValue() > supplier.orderLimit())
       throw new IllegalStateException("New supplier on trial: orders are limited to R" + (int) SupplierRegistry.TRIAL_ORDER_LIMIT + " until " + SupplierRegistry.TRIAL_DELIVERIES + " deliveries are completed");
 
     String id = "GO-" + (++sequence);
     Instant now = clock.instant();
-    GroupOrder o = new GroupOrder(id, supplier.id(), supplier.name(), r.product().trim(), SimulatedXrplLedger.money(r.unitPrice()), r.minQuantity(), fee,
-        now.plus(window), now, actorType + ":" + actorId, r.reason() == null ? "" : r.reason(), shares);
+    GroupOrder o = new GroupOrder(id, supplier.id(), supplier.name(), r.product().trim(), SimulatedXrplLedger.money(unitPrice), r.minQuantity(), fee,
+        now.plus(window), now, actorType + ":" + actorId, reason, shares);
+    if (catalog != null && catalog.price(supplier.id(), o.product).isPresent()) { catalog.reserve(supplier.id(), o.product, wanted); o.stockReserved = true; }
     orders.put(id, o);
+    if (redirectedFrom != null) event(o, ActorType.SYSTEM, "stock-check", "GROUP_ORDER_REDIRECTED", Map.of("from", redirectedFrom, "product", o.product, "quantity", wanted),
+        Map.of("to", supplier.name(), "unitPrice", o.unitPrice));
     event(o, actorType, actorId, "GROUP_ORDER_DRAFTED", Map.of("supplierId", supplier.id(), "product", o.product, "unitPrice", o.unitPrice,
         "minQuantity", o.minQuantity, "deliveryFee", fee, "members", r.members().size()), Map.of("orderId", id, "total", total, "approvalDeadline", o.approvalDeadline.toString()));
     return o;
@@ -233,6 +256,7 @@ public class GroupOrderService {
   private void decide(GroupOrder o) {
     if (o.fundedQuantity() >= o.minQuantity) {
       o.status = Status.FUNDED; o.deliveryDeadline = clock.instant().plus(deliveryWindow);
+      releaseStock(o, o.totalQuantity() - o.fundedQuantity());   // shares that did not pay give their units back
       event(o, ActorType.SYSTEM, "escrow", "ORDER_FUNDED", Map.of("fundedQuantity", o.fundedQuantity(), "minQuantity", o.minQuantity),
           Map.of("heldInEscrow", o.heldInEscrow(), "deliveryDeadline", o.deliveryDeadline.toString()));
     } else {
@@ -261,7 +285,13 @@ public class GroupOrderService {
     return changed;
   }
 
+  private void releaseStock(GroupOrder o, int qty) {
+    if (catalog != null && o.stockReserved && qty > 0) catalog.release(o.supplierId, o.product, qty);
+  }
+
   private void refundAll(GroupOrder o, String reason) {
+    // Cancelled while collecting: every reserved unit goes back. Refunded after funding: the funded units go back.
+    releaseStock(o, o.status == Status.CANCELLED ? o.totalQuantity() : o.fundedQuantity());
     for (Share s : o.shares) {
       if (s.status != ShareStatus.FUNDED) continue;
       SimulatedXrplLedger.Tx tx = ledger.cancelEscrow(s.escrowId, "refund:" + o.id);
@@ -273,6 +303,65 @@ public class GroupOrderService {
   }
 
   // ---------------------------------------------------------------- supplier and delivery
+
+  /**
+   * The agent approves a member's PENDING share on the member's behalf. The caller (AgentGateway) checks the member's
+   * Human Rules; payment then passes the member's full mandate check exactly as a human approval does.
+   */
+  public synchronized Share agentApproveShare(String orderId, String ownerId, boolean identityVerified, String agentId) {
+    GroupOrder o = get(orderId);
+    Share s = memberShare(o, ownerId);
+    if (o.status != Status.COLLECTING) throw new IllegalStateException("This order is no longer collecting approvals");
+    if (clock.instant().isAfter(o.approvalDeadline)) { processDeadlines(); throw new IllegalStateException("The approval deadline has passed"); }
+    if (s.status != ShareStatus.PENDING) return s;   // already paid, declined or blocked: nothing to do
+    if (!identityVerified) {
+      s.status = ShareStatus.BLOCKED; s.blockedReason = "Identity verification (Level 2) is required before placing orders"; s.decidedAt = clock.instant().toString();
+      event(o, ActorType.AGENT, agentId, "SHARE_BLOCKED", Map.of("ownerId", ownerId, "reason", "LEVEL_2_REQUIRED"), Map.of());
+      return s;
+    }
+    event(o, ActorType.AGENT, agentId, "SHARE_APPROVED_BY_AGENT", Map.of("ownerId", ownerId, "amount", s.total, "quantity", s.quantity), Map.of());
+    fund(o, s, "AGENT:" + agentId);
+    if (s.status == ShareStatus.BLOCKED) event(o, ActorType.AGENT, agentId, "AGENT_APPROVAL_BLOCKED", Map.of("ownerId", ownerId), Map.of("reason", String.valueOf(s.blockedReason)));
+    settleIfReady(o);
+    return s;
+  }
+
+  /** PENDING shares of orders still collecting: (orderId, ownerId) pairs for the agent to look at. */
+  public synchronized List<String[]> pendingShares() {
+    List<String[]> out = new ArrayList<>();
+    for (GroupOrder o : orders.values()) if (o.status == Status.COLLECTING && !clock.instant().isAfter(o.approvalDeadline))
+      for (Share s : o.shares) if (s.status == ShareStatus.PENDING) out.add(new String[]{o.id, s.ownerId});
+    return out;
+  }
+
+  /**
+   * The supplier declines a paid order it has not accepted yet (e.g. no stock or no transport). Every member is refunded,
+   * the order is cancelled, and the same order is redirected to the cheapest other verified supplier with enough stock
+   * (each member approves again, or the agent does within their mandate and Human Rules). Returns the new order, if any.
+   */
+  public synchronized Optional<GroupOrder> supplierDecline(String orderId, String supplierUserId, String reason) {
+    GroupOrder o = get(orderId);
+    SupplierRegistry.SupplierInfo supplier = suppliers.find(o.supplierId).orElseThrow();
+    if (!supplierUserId.equals(supplier.accountUserId())) throw new SecurityException("Only the order's supplier can update it");
+    if (o.status != Status.FUNDED) throw new IllegalStateException("Only paid orders that are not yet accepted can be declined");
+    String why = reason == null || reason.isBlank() ? "No reason given" : reason.trim();
+    if (why.length() > 200) why = why.substring(0, 200);
+    event(o, ActorType.HUMAN, supplierUserId, "SUPPLIER_DECLINED", Map.of("reason", why), Map.of());
+    o.status = Status.CANCELLED;
+    refundAll(o, "Supplier declined: " + why);
+    if (catalog == null) return Optional.empty();
+    List<MemberLine> members = o.shares.stream().filter(s -> s.status == ShareStatus.REFUNDED || s.status == ShareStatus.PENDING)
+        .map(s -> new MemberLine(s.ownerId, s.ownerName, s.quantity)).toList();
+    if (members.isEmpty()) return Optional.empty();
+    int qty = members.stream().mapToInt(MemberLine::quantity).sum();
+    Optional<SupplierCatalog.Item> alt = catalog.alternative(o.product, qty, Set.of(o.supplierId),
+        i -> suppliers.find(i.supplierId()).map(SupplierRegistry.SupplierInfo::canReceiveOrders).orElse(false));
+    if (alt.isEmpty()) return Optional.empty();
+    GroupOrder next = draft(new DraftRequest(alt.get().supplierId(), o.product, alt.get().unitPrice(), Math.min(o.minQuantity, qty), o.deliveryFee,
+        Duration.ofHours(24), members, "Redirected after " + supplier.name() + " declined: " + why), ActorType.SYSTEM, "supplier-redirect");
+    event(o, ActorType.SYSTEM, "supplier-redirect", "ORDER_REDIRECTED", Map.of("to", next.supplierName), Map.of("newOrderId", next.id));
+    return Optional.of(next);
+  }
 
   public synchronized GroupOrder supplierAction(String orderId, String supplierUserId, String action) {
     GroupOrder o = get(orderId);

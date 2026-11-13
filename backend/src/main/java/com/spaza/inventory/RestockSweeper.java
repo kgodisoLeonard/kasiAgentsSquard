@@ -42,9 +42,14 @@ public class RestockSweeper {
     try { sweep(); } catch (RuntimeException e) { log.warn("Restock sweep failed: {}", e.getMessage()); }
   }
 
-  /** Returns the agent results for every product it acted on. */
+  /** Returns the agent results for every product and group-order share it acted on. */
   public List<Map<String,Object>> sweep() {
     List<Map<String,Object>> results = new ArrayList<>();
+    // Group orders still collecting: the agent approves pending shares for owners whose Human Rules allow it.
+    for (String[] pending : orders.pendingShares()) {
+      if (!humanRules.rules(pending[1]).autoOrderEnabled()) continue;
+      results.add(agent.execute("APPROVE_GROUP_SHARE", Map.of("orderId", pending[0]), pending[1]));
+    }
     for (AppUser owner : users.findAll()) {
       if (!"OWNER".equals(owner.getRole())) continue;
       for (MandateService.RestockRule rule : mandates.restockRules(owner.getId())) {

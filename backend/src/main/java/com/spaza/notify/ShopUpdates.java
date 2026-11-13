@@ -55,7 +55,7 @@ public class ShopUpdates {
     String subject = e.inputs() != null && e.inputs().get("ownerId") != null ? String.valueOf(e.inputs().get("ownerId")) : e.actorId();
     switch (e.action()) {
       case "GROUP_ORDER_DRAFTED" -> {
-        if (members.size() < 2) return;   // single-shop restock orders: the agent already notifies the owner
+        if (members.size() < 2 || "supplier-redirect".equals(e.actorId())) return;   // restocks notify separately; redirects below
         String by = "HUMAN".equals(e.actorType()) ? shop(e.actorId()) : "The buying club";
         for (String m : members) if (!m.equals(e.actorId()))
           post(m, o, "INVITED", by + " invited you to a group order for " + what + ". Approve your share to join.");
@@ -83,6 +83,14 @@ public class ShopUpdates {
         for (String m : members) if (!m.equals(e.actorId())) post(m, o, "DISPUTED", shop(e.actorId()) + " opened a dispute on " + what + ". Escrow is held until a reviewer decides.");
         supplierAccount(o).ifPresent(s -> post(s, o, "DISPUTED", "A buyer opened a dispute on " + what + "."));
       }
+      case "SHARE_APPROVED_BY_AGENT" -> post(subject, o, "AGENT_APPROVED", "The agent approved your share of " + what + " within your mandate and Human Rules.");
+      case "AGENT_APPROVAL_BLOCKED" -> post(subject, o, "NEEDS_APPROVAL", "The agent could not pay your share of " + what + ": "
+          + o.share(subject).map(GroupOrder.Share::blockedReason).orElse("blocked") + ". Approve it yourself or adjust your mandate.");
+      case "GROUP_ORDER_REDIRECTED" -> { for (String m : members) post(m, o, "REDIRECTED", what + " was redirected to " + supplierName(o) + ": "
+          + e.inputs().get("from") + " did not have enough stock."); }
+      case "SUPPLIER_DECLINED" -> { for (String m : members) post(m, o, "SUPPLIER_DECLINED", supplierName(o) + " declined " + what + " (" + e.inputs().get("reason")
+          + "). Your payment was refunded."); }
+      case "ORDER_REDIRECTED" -> { for (String m : members) post(m, o, "REDIRECTED", what + " moved to " + e.inputs().get("to") + " as a new order. The agent approves your share if your rules allow."); }
       default -> { }
     }
   }
