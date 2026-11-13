@@ -2,7 +2,6 @@ import './styles.css';
 import { api } from './api.js';
 import { icons, loader, errorBox } from './ui.js';
 import { renderDashboard } from './pages/dashboard.js';
-import { renderPOS } from './pages/pos.js';
 import { renderAgent } from './pages/agent.js';
 import { renderWallet } from './pages/wallet.js';
 import { renderMandates } from './pages/mandates.js';
@@ -18,7 +17,6 @@ try { user = JSON.parse(localStorage.getItem('spaza_user') || 'null'); }
 catch { localStorage.removeItem('spaza_user'); }
 const ownerRoutes = {
   dashboard: { label: 'Dashboard', title: 'Good day, Thandi 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
-  pos: { label: 'Point of Sale', title: 'Point of Sale', sub: 'Tap or scan products to ring up a sale.', render: renderPOS },
   marketplace: { label: 'Marketplace', title: 'Supplier Marketplace', sub: 'Choose verified products and place stock orders.', render: renderMarketplace },
   agent: { label: 'Group Buys', title: 'AI Group Buying', sub: 'Your agent spots shortages and pools orders with nearby shops.', render: renderAgent },
   wallet: { label: 'Wallet', title: 'RLUSD Wallet', sub: 'Send stablecoin payments on the XRPL Testnet.', render: renderWallet },
@@ -67,7 +65,7 @@ document.getElementById('app').innerHTML = `
       <section id="content"></section>
     </main>
   </div>
-  <nav class="mobile-nav">${navButtons('m', ['dashboard', 'pos', 'agent', 'wallet'])}
+  <nav class="mobile-nav">${navButtons('m', ['dashboard', 'marketplace', 'agent', 'wallet'])}
     <button class="nav-btn m" id="more-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>More</span></button>
   </nav>
 `;
