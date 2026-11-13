@@ -1,18 +1,24 @@
 import { esc, money, toast, icons, emojiFor } from '../ui.js';
 
+/**
+ * Till. A customer's order is an open order on the server: adding an item takes it off the shelf immediately
+ * (addToOrder), removing it or cancelling puts it back, and taking payment closes the order. When stock drops below
+ * an owner-set restock rule, the Finance Agent reorders automatically within the mandate.
+ */
 export async function renderPOS(root, api, alive) {
-  const data = await api.inventory();
+  const [data, openData] = await Promise.all([api.inventory(), api.openCustomerOrder()]);
   if (!alive()) return;
   let inventory = data.inventory;
-  const cart = new Map(); // id -> qty
+  let order = openData.order || null; // { id, lines:[{productId,name,category,qty,unitPrice,lineTotal}], subtotal, profit }
   let method = 'cash';
   let filter = '';
+  let busy = false;
 
   root.innerHTML = `
     <div class="grid g-3">
       <div class="card span-2">
         <div class="card-head">
-          <div><h3>Products</h3><p class="sub">Tap a product or type a barcode and press Enter</p></div>
+          <div><h3>Products</h3><p class="sub">Tap a product or type a barcode and press Enter. Items leave stock as soon as they are added.</p></div>
           <button class="btn btn-ghost btn-sm" id="add-product">+ New product</button>
         </div>
         <div class="search">${icons.search}<input id="search" class="input" placeholder="Search name or scan barcode…" autocomplete="off"/></div>
@@ -20,8 +26,8 @@ export async function renderPOS(root, api, alive) {
       </div>
 
       <div class="card" style="align-self:start;position:sticky;top:20px">
-        <div class="card-head"><div><h3>Current sale</h3><p class="sub" id="cart-count">0 items</p></div>
-          <button class="btn btn-ghost btn-sm" id="clear">Clear</button></div>
+        <div class="card-head"><div><h3>Customer order</h3><p class="sub" id="cart-count">No open order</p></div>
+          <button class="btn btn-ghost btn-sm" id="clear">Cancel order</button></div>
         <div id="cart" class="cart-list"></div>
         <div class="divider"></div>
         <div class="stack-sm">
@@ -37,78 +43,107 @@ export async function renderPOS(root, api, alive) {
           <div class="field"><label for="cash">Cash tendered</label><input id="cash" type="number" min="0" step="0.5" class="input" placeholder="0.00"/></div>
           <div class="row" style="margin-top:8px;font-size:13px"><span class="k">Change due</span><span class="mono" id="change" style="color:var(--primary)">R0.00</span></div>
         </div>
-        <button id="complete" class="btn btn-primary btn-block" style="margin-top:16px;padding:14px">Complete sale</button>
+        <button id="complete" class="btn btn-primary btn-block" style="margin-top:16px;padding:14px">Take payment &amp; close order</button>
+        <div id="agent-log" class="stack-sm" style="margin-top:14px"></div>
       </div>
     </div>`;
 
   const $ = (s) => root.querySelector(s);
   const byId = (id) => inventory.find((p) => p.id === id);
-  const totals = () => {
-    let sub = 0, profit = 0, count = 0;
-    cart.forEach((q, id) => { const p = byId(id); if (p) { sub += p.price * q; profit += (p.price - p.cost) * q; count += q; } });
-    return { sub, profit, count };
-  };
+  const subtotal = () => Number(order?.subtotal || 0);
 
   function drawCatalog() {
     const f = filter.toLowerCase();
     const list = inventory.filter((p) => p.name.toLowerCase().includes(f) || p.barcode.includes(f) || (p.category || '').toLowerCase().includes(f));
-    $('#catalog').innerHTML = list.map((p) => {
-      const left = p.qty - (cart.get(p.id) || 0);
-      return `
-      <div class="product ${p.qty <= p.lowStock ? 'low' : ''} ${left <= 0 ? 'out' : ''}" data-id="${esc(p.id)}" title="Click to update price">
+    $('#catalog').innerHTML = list.map((p) => `
+      <div class="product ${p.qty <= p.lowStock ? 'low' : ''} ${p.qty <= 0 ? 'out' : ''}" data-id="${esc(p.id)}" title="Click to update price">
         <div class="emoji">${emojiFor(p.category)}</div>
         <div class="name">${esc(p.name)}</div>
         <div class="meta">${esc(p.barcode)}</div>
-        <div class="foot"><span class="price">${money(p.price)}</span><span class="stock">${left <= 0 ? 'Sold out' : left + ' left'}</span></div>
-        <div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn btn-ghost btn-sm" data-edit-price="${esc(p.id)}">Update price</button><button type="button" class="btn btn-primary btn-sm" data-add="${esc(p.id)}">Add</button></div>
-      </div>`;
-    }).join('') || `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div>No products match “${esc(filter)}”</div>`;
+        <div class="foot"><span class="price">${money(p.price)}</span><span class="stock">${p.qty <= 0 ? 'Sold out' : p.qty + ' left'}</span></div>
+        <div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn btn-ghost btn-sm" data-edit-price="${esc(p.id)}">Update price</button><button type="button" class="btn btn-primary btn-sm" data-add="${esc(p.id)}" ${p.qty <= 0 ? 'disabled' : ''}>Add</button></div>
+      </div>`).join('') || `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div>No products match “${esc(filter)}”</div>`;
   }
 
   function drawCart() {
-    const { sub, profit, count } = totals();
-    $('#cart').innerHTML = cart.size ? [...cart].map(([id, q]) => {
-      const p = byId(id);
-      return `
+    const lines = order?.lines || [];
+    const count = lines.reduce((n, l) => n + l.qty, 0);
+    $('#cart').innerHTML = lines.length ? lines.map((l) => `
       <div class="cart-item">
-        <div style="font-size:22px">${emojiFor(p.category)}</div>
-        <div class="info"><b>${esc(p.name)}</b><span>${money(p.price)} each</span></div>
-        <div class="qty"><button data-dec="${esc(id)}" aria-label="Decrease">−</button><span>${q}</span><button data-inc="${esc(id)}" aria-label="Increase">+</button></div>
-      </div>`;
-    }).join('') : `<div class="empty"><div class="big">🛒</div>Cart is empty</div>`;
-    $('#cart-count').textContent = `${count} item${count === 1 ? '' : 's'}`;
-    $('#subtotal').textContent = money(sub);
-    $('#profit').textContent = money(profit);
-    $('#total').textContent = money(sub);
+        <div style="font-size:22px">${emojiFor(l.category)}</div>
+        <div class="info"><b>${esc(l.name)}</b><span>${money(l.unitPrice)} each</span></div>
+        <div class="qty"><button data-dec="${esc(l.productId)}" aria-label="Remove one ${esc(l.name)}">−</button><span>${l.qty}</span><button data-inc="${esc(l.productId)}" aria-label="Add one ${esc(l.name)}">+</button></div>
+      </div>`).join('') : `<div class="empty"><div class="big">🛒</div>No items yet</div>`;
+    $('#cart-count').textContent = order ? `${order.id} · ${count} item${count === 1 ? '' : 's'}` : 'No open order';
+    $('#subtotal').textContent = money(subtotal());
+    $('#profit').textContent = money(order?.profit || 0);
+    $('#total').textContent = money(subtotal());
     updateChange();
     drawCatalog();
   }
 
   function updateChange() {
     const t = parseFloat($('#cash').value) || 0;
-    $('#change').textContent = money(Math.max(0, t - totals().sub));
+    $('#change').textContent = money(Math.max(0, t - subtotal()));
   }
 
-  function add(id) {
-    const p = byId(id); if (!p) return;
-    const q = cart.get(id) || 0;
-    if (q >= p.qty) return toast(`Only ${p.qty} ${p.name} in stock`, 'error');
-    cart.set(id, q + 1); drawCart();
+  /** Shows what the agent did after a sale dropped stock below a restock rule. */
+  function showRestock(r) {
+    if (!r) return;
+    const res = r.result || {};
+    let text;
+    if (!r.allowed) text = `Agent could not act: ${r.reason}`;
+    else if (res.status === 'ORDERED') text = `🤖 Agent ordered ${res.quantity} × ${res.product} (${money(res.total)}, held in escrow) · ${res.orderId}`;
+    else if (res.status === 'BLOCKED') text = `🤖 Restock for ${res.product} blocked by your mandate: ${res.reason}`;
+    else if (res.status === 'ESCALATED') text = `🤖 ${res.reason}`;
+    else if (res.code === 'ORDER_ALREADY_OPEN') text = `🤖 ${res.product}: restock order ${res.orderId} is already open`;
+    else return;
+    $('#agent-log').insertAdjacentHTML('afterbegin', `<div class="sim-note" style="margin-top:0">${esc(text)}</div>`);
+    if (res.status === 'ORDERED' || res.status === 'BLOCKED' || res.status === 'ESCALATED') toast(text.replace('🤖 ', ''), res.status === 'ORDERED' ? 'success' : 'error');
   }
 
-  $('#catalog').addEventListener('click', (e) => { const edit = e.target.closest('[data-edit-price]'); if (edit) return openPriceModal(api, byId(edit.dataset.editPrice), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); const addButton = e.target.closest('[data-add]'); if (addButton) return add(addButton.dataset.add); const card = e.target.closest('[data-id]'); if (card) openPriceModal(api, byId(card.dataset.id), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); });
+  async function ensureOrder() {
+    if (!order) order = (await api.newCustomerOrder()).order;
+    return order;
+  }
+
+  async function run(fn) {
+    if (busy) return; busy = true;
+    try { await fn(); } catch (err) { toast(err.message, 'error'); inventory = (await api.inventory()).inventory; }
+    finally { busy = false; drawCart(); }
+  }
+
+  const add = (id) => run(async () => {
+    const o = await ensureOrder();
+    const r = await api.addToOrder(o.id, id, 1);
+    order = r.order;
+    inventory = inventory.map((p) => (p.id === r.item.id ? r.item : p));
+    showRestock(r.restock);
+  });
+
+  const remove = (id) => run(async () => {
+    order = (await api.removeFromOrder(order.id, id, 1)).order;
+    inventory = (await api.inventory()).inventory;
+  });
+
+  $('#catalog').addEventListener('click', (e) => { const edit = e.target.closest('[data-edit-price]'); if (edit) return openPriceModal(api, byId(edit.dataset.editPrice), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); const addButton = e.target.closest('[data-add]'); if (addButton) return add(addButton.dataset.add); const card = e.target.closest('[data-id]'); if (card && !e.target.closest('button')) openPriceModal(api, byId(card.dataset.id), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); });
   $('#cart').addEventListener('click', (e) => {
     const inc = e.target.closest('[data-inc]'); const dec = e.target.closest('[data-dec]');
     if (inc) add(inc.dataset.inc);
-    if (dec) { const id = dec.dataset.dec; const q = cart.get(id) - 1; q > 0 ? cart.set(id, q) : cart.delete(id); drawCart(); }
+    if (dec) remove(dec.dataset.dec);
   });
   $('#search').addEventListener('input', (e) => { filter = e.target.value.trim(); drawCatalog(); });
   $('#search').addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter' || !/^\d{6,14}$/.test(filter)) return;
-    try { const r = await api.inventoryByBarcode(filter); add(r.item.id); e.target.value = ''; filter = ''; drawCatalog(); toast(`Scanned ${r.item.name}`); }
+    try { const r = await api.inventoryByBarcode(filter); await add(r.item.id); e.target.value = ''; filter = ''; drawCatalog(); toast(`Scanned ${r.item.name}`); }
     catch (err) { toast(err.message, 'error'); }
   });
-  $('#clear').addEventListener('click', () => { cart.clear(); drawCart(); });
+  $('#clear').addEventListener('click', () => run(async () => {
+    if (!order) return;
+    await api.cancelCustomerOrder(order.id);
+    order = null; inventory = (await api.inventory()).inventory;
+    toast('Order cancelled. Items returned to stock.');
+  }));
   $('#cash').addEventListener('input', updateChange);
   $('#methods').addEventListener('click', (e) => {
     const b = e.target.closest('[data-m]'); if (!b) return;
@@ -117,20 +152,17 @@ export async function renderPOS(root, api, alive) {
     $('#cash-box').style.display = method === 'cash' ? '' : 'none';
   });
 
-  $('#complete').addEventListener('click', async () => {
-    const { sub } = totals();
-    if (!cart.size) return toast('Cart is empty', 'error');
+  $('#complete').addEventListener('click', () => {
+    if (!order?.lines?.length) return toast('Add items to the order first', 'error');
     const tendered = parseFloat($('#cash').value) || 0;
-    if (method === 'cash' && tendered < sub) return toast(`Cash tendered is short by ${money(sub - tendered)}`, 'error');
+    if (method === 'cash' && tendered < subtotal()) return toast(`Cash tendered is short by ${money(subtotal() - tendered)}`, 'error');
     const btn = $('#complete'); btn.disabled = true; btn.textContent = 'Processing…';
-    try {
-      const res = await api.sale({ items: [...cart].map(([productId, quantity]) => ({ productId, quantity })), paymentMethod: method, cashTendered: tendered });
-      toast(`${res.sale.saleId} done · ${money(res.sale.subtotal)}${res.sale.changeDue ? ' · change ' + money(res.sale.changeDue) : ''}`);
-      cart.clear(); $('#cash').value = '';
+    run(async () => {
+      const res = await api.closeCustomerOrder(order.id, { paymentMethod: method, cashTendered: tendered });
+      toast(`${res.sale.saleId} closed · ${money(res.sale.subtotal)}${res.sale.changeDue ? ' · change ' + money(res.sale.changeDue) : ''}`);
+      order = null; $('#cash').value = '';
       inventory = (await api.inventory()).inventory;
-      drawCart();
-    } catch (err) { toast(err.message, 'error'); }
-    finally { btn.disabled = false; btn.textContent = 'Complete sale'; }
+    }).finally(() => { btn.disabled = false; btn.textContent = 'Take payment & close order'; });
   });
 
   $('#add-product').addEventListener('click', () => openProductModal(api, async () => {

@@ -3,6 +3,9 @@ package com.spaza.finance;
 import com.spaza.audit.AuditLog;
 import com.spaza.audit.AuditLog.ActorType;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
@@ -15,6 +18,10 @@ public class MandateService implements MandateReader {
   /** A verified human, as established by the authentication layer. The agent never holds one of these. */
   public record HumanActor(String userId, String role) {}
   public record PaymentRequest(String ownerId, String supplierId, BigDecimal amount, String orderId, Instant orderDeadline, String initiatedBy) {}
+  /** Owner-set automatic restock rule: when stock of the product falls below reorderBelow, order orderQuantity from supplierId. */
+  public record RestockRule(String product, int reorderBelow, int orderQuantity, String supplierId, BigDecimal maxUnitPrice) {
+    public Map<String,Object> view() { return Map.of("product", product, "reorderBelow", reorderBelow, "orderQuantity", orderQuantity, "supplierId", supplierId, "maxUnitPrice", maxUnitPrice); }
+  }
   public record Decision(boolean allowed, String code, String reason) {
     public Map<String,Object> view() { return Map.of("allowed", allowed, "code", code, "reason", reason); }
   }
@@ -24,6 +31,8 @@ public class MandateService implements MandateReader {
   private final AuditLog audit;
   private final Clock clock;
   private final Map<String,BigDecimal> spentByOwnerDay = new HashMap<>();
+  private final Map<String,BigDecimal> agentSpentByOwnerMonth = new HashMap<>();
+  private final ObjectMapper json = new ObjectMapper();
 
   public MandateService(SpendingMandateRepository repository, SupplierRegistry suppliers, AuditLog audit, Clock clock) {
     this.repository = repository; this.suppliers = suppliers; this.audit = audit; this.clock = clock;
@@ -31,7 +40,10 @@ public class MandateService implements MandateReader {
 
   public synchronized Decision authorize(PaymentRequest r) {
     Decision d = evaluate(r);
-    if (d.allowed()) spentByOwnerDay.merge(dayKey(r.ownerId()), r.amount(), BigDecimal::add);
+    if (d.allowed()) {
+      spentByOwnerDay.merge(dayKey(r.ownerId()), r.amount(), BigDecimal::add);
+      if (isAgent(r)) agentSpentByOwnerMonth.merge(monthKey(r.ownerId()), r.amount(), BigDecimal::add);
+    }
     Map<String,Object> in = new LinkedHashMap<>();
     in.put("ownerId", r.ownerId()); in.put("supplierId", r.supplierId()); in.put("amount", r.amount().toPlainString());
     in.put("orderId", String.valueOf(r.orderId())); in.put("initiatedBy", r.initiatedBy());
@@ -40,8 +52,11 @@ public class MandateService implements MandateReader {
   }
 
   /** Gives back daily allowance when an escrow is refunded or a ledger submission fails. */
-  public synchronized void release(String ownerId, BigDecimal amount) {
+  public synchronized void release(String ownerId, BigDecimal amount) { release(ownerId, amount, false); }
+
+  public synchronized void release(String ownerId, BigDecimal amount, boolean agentInitiated) {
     spentByOwnerDay.computeIfPresent(dayKey(ownerId), (k, v) -> v.subtract(amount).max(BigDecimal.ZERO));
+    if (agentInitiated) agentSpentByOwnerMonth.computeIfPresent(monthKey(ownerId), (k, v) -> v.subtract(amount).max(BigDecimal.ZERO));
   }
 
   private Decision evaluate(PaymentRequest r) {
@@ -59,6 +74,11 @@ public class MandateService implements MandateReader {
     BigDecimal spent = spentByOwnerDay.getOrDefault(dayKey(r.ownerId()), BigDecimal.ZERO);
     if (spent.add(r.amount()).compareTo(m.getDailyCap()) > 0) return blocked("DAILY_CAP", "Would exceed the daily cap of R" + m.getDailyCap().toPlainString() + " (already committed today: R" + spent.toPlainString() + ")");
     if (m.isEnforceOrderDeadline() && r.orderDeadline() != null && clock.instant().isAfter(r.orderDeadline())) return blocked("ORDER_DEADLINE_PASSED", "The order's approval deadline has passed");
+    if (isAgent(r)) {
+      BigDecimal agentSpent = agentSpentByOwnerMonth.getOrDefault(monthKey(r.ownerId()), BigDecimal.ZERO);
+      if (agentSpent.add(r.amount()).compareTo(m.getMonthlyAgentBudget()) > 0)
+        return blocked("AGENT_BUDGET", "Would exceed the agent's monthly budget of R" + m.getMonthlyAgentBudget().toPlainString() + " (agent already spent R" + agentSpent.toPlainString() + " this month)");
+    }
     return new Decision(true, "OK", "Within mandate");
   }
 
@@ -77,6 +97,48 @@ public class MandateService implements MandateReader {
     SpendingMandate saved = repository.save(m);
     audit.record(ActorType.HUMAN, actor.userId(), "MANDATE_CHANGED", Map.of("ownerId", ownerId, "previous", previous), view(saved));
     return saved;
+  }
+
+  /** Only the owning human can set the agent's budget and restock rules. Rules must use approved suppliers. */
+  public synchronized SpendingMandate updateAutonomy(HumanActor actor, String ownerId, BigDecimal monthlyBudget, List<RestockRule> rules) {
+    if (actor == null || !"OWNER".equals(actor.role()) || !actor.userId().equals(ownerId)) throw new SecurityException("Only the owner of this mandate can change it");
+    SpendingMandate m = repository.findById(ownerId).orElseThrow(() -> new IllegalStateException("Create your spending mandate before adding restock rules"));
+    BigDecimal budget = monthlyBudget == null ? BigDecimal.ZERO : monthlyBudget;
+    if (budget.signum() < 0) throw new IllegalArgumentException("Agent budget cannot be negative");
+    Set<String> products = new HashSet<>();
+    for (RestockRule r : rules) {
+      if (r.product() == null || r.product().isBlank()) throw new IllegalArgumentException("Each restock rule needs a product");
+      if (!products.add(r.product().toLowerCase(Locale.ROOT))) throw new IllegalArgumentException("Only one restock rule per product: " + r.product());
+      if (r.reorderBelow() < 1) throw new IllegalArgumentException("Reorder level must be at least 1 for " + r.product());
+      if (r.orderQuantity() < 1) throw new IllegalArgumentException("Order quantity must be at least 1 for " + r.product());
+      if (r.maxUnitPrice() == null || r.maxUnitPrice().signum() <= 0) throw new IllegalArgumentException("Maximum unit price must be positive for " + r.product());
+      if (!m.getAllowedSuppliers().contains(r.supplierId())) throw new IllegalArgumentException("Supplier for " + r.product() + " must be on your approved supplier list");
+    }
+    Map<String,Object> previous = view(m);
+    try { m.applyAutonomy(budget, json.writeValueAsString(rules), actor.userId(), clock.instant()); }
+    catch (Exception e) { throw new IllegalArgumentException("Could not save restock rules"); }
+    SpendingMandate saved = repository.save(m);
+    audit.record(ActorType.HUMAN, actor.userId(), "MANDATE_CHANGED", Map.of("ownerId", ownerId, "previous", previous, "part", "agent budget and restock rules"), view(saved));
+    return saved;
+  }
+
+  public synchronized List<RestockRule> restockRules(String ownerId) {
+    return repository.findById(ownerId).map(this::rules).orElse(List.of());
+  }
+
+  private List<RestockRule> rules(SpendingMandate m) {
+    try { return json.readValue(m.getRestockRules(), new TypeReference<List<RestockRule>>() {}); }
+    catch (Exception e) { return List.of(); }
+  }
+
+  /** Seeds demo restock rules and budget for a demo owner when none are set yet. */
+  public synchronized void ensureDefaultRestock(String ownerId, BigDecimal budget, List<RestockRule> rules) {
+    Optional<SpendingMandate> found = repository.findById(ownerId);
+    if (found.isEmpty() || found.get().getMonthlyAgentBudget().signum() != 0 || !rules(found.get()).isEmpty()) return;
+    SpendingMandate m = found.get();
+    try { m.applyAutonomy(budget, json.writeValueAsString(rules), "system-seed", clock.instant()); } catch (Exception e) { return; }
+    repository.save(m);
+    audit.record(ActorType.SYSTEM, "seed", "RESTOCK_RULES_SEEDED", Map.of("ownerId", ownerId), view(m));
   }
 
   /** Seeds a default mandate for demo accounts only when none exists. */
@@ -99,9 +161,14 @@ public class MandateService implements MandateReader {
     v.put("enforceOrderDeadline", m.isEnforceOrderDeadline()); v.put("version", m.getVersion());
     v.put("updatedBy", m.getUpdatedBy()); v.put("updatedAt", m.getUpdatedAt().toString());
     v.put("spentToday", spentByOwnerDay.getOrDefault(dayKey(m.getOwnerId()), BigDecimal.ZERO));
+    v.put("monthlyAgentBudget", m.getMonthlyAgentBudget());
+    v.put("agentSpentThisMonth", agentSpentByOwnerMonth.getOrDefault(monthKey(m.getOwnerId()), BigDecimal.ZERO));
+    v.put("restockRules", rules(m).stream().map(RestockRule::view).toList());
     return Collections.unmodifiableMap(v);
   }
 
   private String dayKey(String ownerId) { return ownerId + "@" + LocalDate.now(clock); }
+  private String monthKey(String ownerId) { return ownerId + "@" + YearMonth.now(clock); }
+  private static boolean isAgent(PaymentRequest r) { return r.initiatedBy() != null && r.initiatedBy().startsWith("AGENT:"); }
   private static Decision blocked(String code, String reason) { return new Decision(false, code, reason); }
 }

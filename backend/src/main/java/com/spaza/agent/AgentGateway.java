@@ -3,12 +3,14 @@ package com.spaza.agent;
 import com.spaza.audit.AuditLog;
 import com.spaza.audit.AuditLog.ActorType;
 import com.spaza.finance.*;
+import com.spaza.model.AppUser;
 import com.spaza.model.Product;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.*;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -27,7 +29,7 @@ public class AgentGateway {
       + "cases to a human. Every action you take is logged.";
 
   /** The allow-list. Nothing outside this enum can be executed. */
-  public enum Action { DETECT_SHORTAGES, RECOMMEND_SUPPLIER, NOTIFY, DRAFT_GROUP_ORDER, EXECUTE_APPROVED_PAYMENT, READ_MANDATE }
+  public enum Action { DETECT_SHORTAGES, RECOMMEND_SUPPLIER, NOTIFY, DRAFT_GROUP_ORDER, EXECUTE_APPROVED_PAYMENT, READ_MANDATE, PLACE_RESTOCK_ORDER }
 
   /** Known dangerous requests get a specific refusal reason (everything not allow-listed is refused regardless). */
   private static final Map<String,String> EXPLICIT_DENIALS = Map.ofEntries(
@@ -50,10 +52,14 @@ public class AgentGateway {
   private final Supplier<List<Product>> inventory;
   private final BooleanSupplier enabled;
   private final AuditLog audit;
+  private final SupplierCatalog catalog;
+  private final Function<String,Optional<AppUser>> owners;
   private final List<Map<String,Object>> notifications = new ArrayList<>();
 
-  public AgentGateway(MandateReader mandates, GroupOrderService orders, SupplierRegistry suppliers, Supplier<List<Product>> inventory, BooleanSupplier enabled, AuditLog audit) {
+  public AgentGateway(MandateReader mandates, GroupOrderService orders, SupplierRegistry suppliers, Supplier<List<Product>> inventory, BooleanSupplier enabled, AuditLog audit,
+                      SupplierCatalog catalog, Function<String,Optional<AppUser>> owners) {
     this.mandates = mandates; this.orders = orders; this.suppliers = suppliers; this.inventory = inventory; this.enabled = enabled; this.audit = audit;
+    this.catalog = catalog; this.owners = owners;
   }
 
   /** @param onBehalfOf the human owner the agent is working for (from the authenticated session or the scheduler). */
@@ -79,6 +85,7 @@ public class AgentGateway {
         case DRAFT_GROUP_ORDER -> draft(p, onBehalfOf);
         case EXECUTE_APPROVED_PAYMENT -> pay(str(p, "orderId"), str(p, "ownerId"));
         case READ_MANDATE -> readMandate(onBehalfOf);
+        case PLACE_RESTOCK_ORDER -> restock(str(p, "product"), onBehalfOf);
       };
       Map<String,Object> out = new LinkedHashMap<>(); out.put("allowed", true); out.put("action", action.name()); out.put("result", result);
       if (!untrusted.isEmpty()) out.put("untrustedInput", untrusted);
@@ -137,6 +144,52 @@ public class AgentGateway {
     Map<String,Object> v = new LinkedHashMap<>(); v.put("orderId", orderId); v.put("ownerId", ownerId); v.put("shareStatus", s.status().name());
     v.put("blockedReason", s.blockedReason()); v.put("escrowTx", s.escrowId());
     return v;
+  }
+
+  /**
+   * Autonomous restock under the owner's standing mandate rule. The agent cannot choose the quantity, supplier or price:
+   * all come from the rule and the supplier's price list. It only acts when stock is below the rule's level and no order
+   * for the product is already open. Payment then passes the full mandate check (including the monthly agent budget).
+   */
+  @SuppressWarnings("unchecked")
+  private Map<String,Object> restock(String product, String ownerId) {
+    Map<String,Object> result = new LinkedHashMap<>(); result.put("product", product);
+    Map<String,Object> mandate = mandates.snapshot(ownerId).orElse(Map.of());
+    List<Map<String,Object>> rules = (List<Map<String,Object>>) mandate.getOrDefault("restockRules", List.of());
+    Map<String,Object> rule = rules.stream().filter(r -> product.equalsIgnoreCase(String.valueOf(r.get("product")))).findFirst().orElse(null);
+    if (rule == null) return skip(result, "NO_RULE", "No restock rule in the owner's mandate for this product");
+    Product item = inventory.get().stream().filter(x -> x.getName().equalsIgnoreCase(product)).findFirst().orElse(null);
+    if (item == null) return skip(result, "UNKNOWN_PRODUCT", "Product is not in the shop inventory");
+    int below = ((Number) rule.get("reorderBelow")).intValue(), qty = ((Number) rule.get("orderQuantity")).intValue();
+    String supplierId = String.valueOf(rule.get("supplierId"));
+    result.put("stock", item.getQty()); result.put("reorderBelow", below);
+    if (item.getQty() >= below) return skip(result, "STOCK_OK", "Stock " + item.getQty() + " is not below the reorder level " + below);
+    Optional<GroupOrder> open = orders.openOrderForMember(ownerId, item.getName());
+    if (open.isPresent()) { result.put("orderId", open.get().id()); return skip(result, "ORDER_ALREADY_OPEN", "Order " + open.get().id() + " for this product is still open"); }
+    Optional<SupplierCatalog.Item> price = catalog.price(supplierId, item.getName());
+    BigDecimal max = new BigDecimal(String.valueOf(rule.get("maxUnitPrice")));
+    if (price.isEmpty()) return escalate(result, ownerId, "NO_PRICE", "Supplier " + supplierId + " has no price for " + item.getName() + ". Please choose another supplier.");
+    if (price.get().unitPrice().compareTo(max) > 0)
+      return escalate(result, ownerId, "PRICE_ABOVE_LIMIT", item.getName() + " costs R" + price.get().unitPrice().toPlainString() + " but your limit is R" + max.toPlainString() + ". Not ordered.");
+    AppUser owner = owners.apply(ownerId).orElseThrow(() -> new IllegalStateException("Owner not found"));
+    String ruleText = "below " + below + " -> order " + qty + " from " + supplierId + " at max R" + max.toPlainString();
+    GroupOrder o = orders.placeStandingOrder(ownerId, owner.getName(), owner.isVerified(), supplierId, item.getName(), price.get().unitPrice(), qty, AGENT_ID, ruleText);
+    GroupOrder.Share share = o.shares().get(0);
+    boolean paid = share.status() == GroupOrder.ShareStatus.FUNDED;
+    result.put("status", paid ? "ORDERED" : "BLOCKED"); result.put("orderId", o.id()); result.put("quantity", qty); result.put("supplierId", supplierId);
+    result.put("unitPrice", price.get().unitPrice()); result.put("total", share.total()); result.put("shareStatus", share.status().name());
+    if (!paid) result.put("reason", share.blockedReason());
+    notify(ownerId, paid
+        ? "Agent ordered " + qty + " x " + item.getName() + " from " + suppliers.find(supplierId).map(SupplierRegistry.SupplierInfo::name).orElse(supplierId) + " for R" + share.total().toPlainString() + " (held in escrow until you confirm delivery). Order " + o.id() + "."
+        : "Agent could not pay for " + item.getName() + " restock (order " + o.id() + "): " + share.blockedReason() + ". You can approve it under Group Orders.");
+    return result;
+  }
+
+  private static Map<String,Object> skip(Map<String,Object> result, String code, String reason) { result.put("status", "SKIPPED"); result.put("code", code); result.put("reason", reason); return result; }
+
+  private Map<String,Object> escalate(Map<String,Object> result, String ownerId, String code, String reason) {
+    notify(ownerId, "Restock needs your attention: " + reason);
+    result.put("status", "ESCALATED"); result.put("code", code); result.put("reason", reason); return result;
   }
 
   private Map<String,Object> readMandate(String ownerId) {

@@ -105,6 +105,13 @@ export const api = {
   addProduct: (body) => post('/pos/inventory', body),
   updateProductPrice: (id, price) => put(`/pos/inventory/${encodeURIComponent(id)}/price`, { price }),
   sale: (body) => post('/pos/sale', body),
+  openCustomerOrder: () => request('/pos/orders/open'),
+  newCustomerOrder: () => post('/pos/orders'),
+  addToOrder: (orderId, productId, quantity = 1) => post(`/pos/orders/${encodeURIComponent(orderId)}/items`, { productId, quantity }),
+  removeFromOrder: (orderId, productId, quantity = 1) => post(`/pos/orders/${encodeURIComponent(orderId)}/items/${encodeURIComponent(productId)}/remove`, { quantity }),
+  cancelCustomerOrder: (orderId) => post(`/pos/orders/${encodeURIComponent(orderId)}/cancel`),
+  closeCustomerOrder: (orderId, body) => post(`/pos/orders/${encodeURIComponent(orderId)}/close`, body),
+  restockCheck: () => post('/pos/restock-check'),
   sales: () => request('/pos/sales'),
 
   shortages: () => request('/agent/shortages'),
@@ -121,6 +128,7 @@ export const api = {
 
   mandate: () => request('/mandates'),
   saveMandate: (body, stepUp) => put('/mandates', body, { stepUp }),
+  saveAutonomy: (body, stepUp) => put('/mandates/autonomy', body, { stepUp }),
 
   groupOrders: () => request('/group-orders'),
   groupMembers: () => request('/group-orders/members'),

@@ -48,7 +48,10 @@ public final class TestSupport {
     public final List<AppUser> users = new ArrayList<>(List.of(
         new AppUser(SUPPLIER_ACCOUNT, "Mokoena Meats", "supplier@mokoena.local", "x", "SUPPLIER", "Mokoena Meats (Pty) Ltd", true),
         new AppUser(OTHER_SUPPLIER_ACCOUNT, "Ubuntu", "ubuntu@coop.local", "x", "SUPPLIER", "Ubuntu Foods Co-op", true),
-        new AppUser(UNVERIFIED_SUPPLIER, "New Supplier", "new@supplier.local", "x", "SUPPLIER", "Brand New Foods", false)));
+        new AppUser(UNVERIFIED_SUPPLIER, "New Supplier", "new@supplier.local", "x", "SUPPLIER", "Brand New Foods", false),
+        new AppUser(OWNER_A, "Owner A", "a@spaza.local", "x", "OWNER", "A's Spaza", true),
+        new AppUser(OWNER_B, "Owner B", "b@spaza.local", "x", "OWNER", "B's Spaza", true)));
+    public final SupplierCatalog catalog = new SupplierCatalog();
     public final SupplierRegistry suppliers = new SupplierRegistry(() -> users);
     public final SimulatedXrplLedger ledger = new SimulatedXrplLedger(clock, suppliers::isVerifiedPayoutAddress);
     public final FakeMandateRepository mandateRepo = new FakeMandateRepository();
@@ -58,7 +61,10 @@ public final class TestSupport {
     public Fixture() {
       setMandate(OWNER_A, "2000", "5000", List.of("SUP-001", UNVERIFIED_SUPPLIER));
       setMandate(OWNER_B, "2000", "5000", List.of("SUP-001"));
+      mandates.updateAutonomy(human(OWNER_A), OWNER_A, new BigDecimal("3000"), List.of());
     }
+
+    public Optional<AppUser> user(String id) { return users.stream().filter(u -> u.getId().equals(id)).findFirst(); }
 
     public void setMandate(String owner, String perOrder, String daily, List<String> allowed) {
       mandates.update(human(owner), owner, new BigDecimal(perOrder), new BigDecimal(daily), allowed, LocalDate.now(clock).plusDays(30), true);

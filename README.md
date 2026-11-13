@@ -42,6 +42,14 @@ Tests (no database or server needed):
 
 Every sign-in asks for a one-time code. No SMS provider is connected, so the code is shown on screen and labelled "Simulated SMS".
 
+## Till and autonomous restock
+1. Staff open **Till** and add items to the customer's order (`addToOrder`). Each item leaves stock **immediately**; removing it or cancelling the order puts it back. **Take payment & close order** closes it.
+2. If a sale takes an item **below the owner's restock level** (default 5), the Finance Agent orders **exactly the quantity, supplier and price limit set in the owner's mandate** (Mandates → *Automatic restock*), within the agent's **monthly budget**.
+3. It will not order again while an order for that item is still open. The payment passes every mandate check, is held in escrow, and is released to the supplier only when the owner confirms delivery. Then the stock is added back to the shelf.
+4. Price above the limit, budget exceeded, or no approved supplier: the agent does not buy, and tells the owner instead.
+
+Demo rules for Thandi: White Bread, Maize Meal (10kg) and Milk restock below 5, from Ubuntu Foods, R3,000/month budget. Sell 8 loaves of bread at the till to see it trigger.
+
 ## Demo flow (about 5 minutes)
 1. **Owner (Thandi):** open **Finance Agent**, then click **Let the agent draft a group order** for a low-stock item. The agent drafts an order for Thandi and Sipho; no money moves.
 2. In the **Agent console**, run `UPDATE_MANDATE`, `TRANSFER_FUNDS` or `READ_IDENTITY_DOCUMENTS`. Each one is refused and logged. Run `RECOMMEND_SUPPLIER` to see the prompt-injection text in Ubuntu Foods' description flagged as untrusted data.
@@ -73,6 +81,7 @@ Status key: **Real** means implemented and enforced in code, and covered by test
 | Agent has no access to identity documents, secrets or wallets | **Real** (no such references exist) · tested | `AgentGatewayTest` |
 | Append-only, hash-chained audit log (who, what, when, inputs, outputs) for agent actions, mandate checks and changes, payments, approvals, sign-ins and disputes; tamper detection | **Real** · tested | `audit/AuditLog`, `GET /api/audit/verify` |
 | Per-member approval; everyone sees the same price and split; quantity-based split that adds up exactly | **Real** · tested | `GroupOrderService.split`, `approveShare` |
+| Autonomous restock: only for products with an owner-set rule, only the rule's quantity, supplier and price limit, within a monthly agent budget, no duplicate while an order is open, paid into escrow | **Real** · tested | `AgentGateway` (`PLACE_RESTOCK_ORDER`), `MandateService.updateAutonomy`, `AutoRestockTest` |
 
 The agent itself is rule-based in this build. The required system prompt is stored in `AgentGateway.SYSTEM_PROMPT` and shown in the UI. No LLM is called yet. If one is connected, it must call `AgentGateway.execute` as its only tool.
 

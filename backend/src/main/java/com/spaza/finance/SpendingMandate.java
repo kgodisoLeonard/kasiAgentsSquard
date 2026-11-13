@@ -19,6 +19,10 @@ public class SpendingMandate {
   @Column(nullable = false) private LocalDate validUntil;
   /** Deadline rule 2: a payment for an order is only allowed before that order's approval deadline. */
   @Column(nullable = false) private boolean enforceOrderDeadline;
+  /** Monthly amount the agent may spend on its own (automatic restocks). Null or zero means no autonomous spending. */
+  @Column(precision = 14, scale = 2) private BigDecimal monthlyAgentBudget;
+  /** Automatic restock rules as JSON: product, reorderBelow, orderQuantity, supplierId, maxUnitPrice. */
+  @Column(length = 4000) private String restockRules;
   @Column(nullable = false) private long version;
   @Column(nullable = false) private String updatedBy;
   @Column(nullable = false) private Instant updatedAt;
@@ -34,6 +38,11 @@ public class SpendingMandate {
     this.validUntil = validUntil; this.enforceOrderDeadline = enforceOrderDeadline;
     this.updatedBy = updatedBy; this.updatedAt = at; this.version++;
   }
+  void applyAutonomy(BigDecimal budget, String rulesJson, String updatedBy, Instant at) {
+    this.monthlyAgentBudget = budget; this.restockRules = rulesJson; this.updatedBy = updatedBy; this.updatedAt = at; this.version++;
+  }
+  public BigDecimal getMonthlyAgentBudget() { return monthlyAgentBudget == null ? BigDecimal.ZERO : monthlyAgentBudget; }
+  public String getRestockRules() { return restockRules == null ? "[]" : restockRules; }
   public String getOwnerId() { return ownerId; }
   public BigDecimal getPerOrderCap() { return perOrderCap; }
   public BigDecimal getDailyCap() { return dailyCap; }

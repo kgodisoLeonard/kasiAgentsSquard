@@ -22,6 +22,8 @@ public class FinanceConfig {
 
   @Bean SupplierRegistry supplierRegistry(AppUserRepository users) { return new SupplierRegistry(users::findAll); }
 
+  @Bean SupplierCatalog supplierCatalog() { return new SupplierCatalog(); }
+
   @Bean SimulatedXrplLedger ledger(Clock clock, SupplierRegistry suppliers) { return new SimulatedXrplLedger(clock, suppliers::isVerifiedPayoutAddress); }
 
   @Bean MandateService mandateService(SpendingMandateRepository repo, SupplierRegistry suppliers, AuditLog audit, Clock clock) {
@@ -38,9 +40,9 @@ public class FinanceConfig {
 
   /** The agent gets the MandateReader interface only, so it has no code path to change a mandate. */
   @Bean AgentGateway agentGateway(MandateService mandates, GroupOrderService orders, SupplierRegistry suppliers, InMemoryStore store,
-                                  AgentProfileRepository agents, AuditLog audit) {
+                                  AgentProfileRepository agents, AuditLog audit, SupplierCatalog catalog, AppUserRepository users) {
     MandateReader readOnly = mandates::snapshot;
     return new AgentGateway(readOnly, orders, suppliers, () -> java.util.List.<Product>copyOf(store.findAll()),
-        () -> agents.findById(AgentGateway.AGENT_ID).map(a -> a.isEnabled()).orElse(true), audit);
+        () -> agents.findById(AgentGateway.AGENT_ID).map(a -> a.isEnabled()).orElse(true), audit, catalog, users::findById);
   }
 }

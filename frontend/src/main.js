@@ -15,6 +15,7 @@ import { renderSupplier } from './pages/supplier.js';
 import { renderMarketplace } from './pages/marketplace.js';
 import { renderOrders } from './pages/orders.js';
 import { renderAudit } from './pages/audit.js';
+import { renderPOS } from './pages/pos.js';
 
 applyTheme();
 localStorage.removeItem('spaza_user'); // legacy, pre-session storage
@@ -25,6 +26,7 @@ const firstName = String(user?.name || '').trim().split(/\s+/)[0];
 const ownerRoutes = {
   studio: { label: '✨ Kasi AI Studio', title: 'Kasi AI Studio', sub: 'Multilingual business intelligence and owner-approved actions.', render: renderStudio },
   dashboard: { label: 'Dashboard', title: firstName ? `Good day, ${firstName} 👋` : 'Good day 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
+  pos: { label: 'Till', title: 'Till · Customer orders', sub: 'Add items to the customer order; stock drops straight away. The agent restocks items that fall below your mandate rules.', render: renderPOS },
   marketplace: { label: 'Marketplace', title: 'Supplier Marketplace', sub: 'Choose verified products and place stock orders.', render: renderMarketplace },
   orders: { label: 'Group Orders', title: 'Group Orders & Escrow', sub: 'Approve only your own share. Money waits in escrow until every buyer confirms delivery.', render: renderOrders },
   agent: { label: 'Finance Agent', title: 'Spaza Finance Agent', sub: 'Shortage detection and order drafts. Allow-listed actions only; every action is logged.', render: renderAgent },
@@ -84,7 +86,7 @@ document.getElementById('app').innerHTML = `
       <section id="content"></section>
     </main>
   </div>
-  <nav class="mobile-nav">${navButtons('m', routes.dashboard ? ['dashboard', 'marketplace', 'orders', 'wallet'] : Object.keys(routes).slice(0, 4))}
+  <nav class="mobile-nav">${navButtons('m', routes.dashboard ? ['dashboard', 'pos', 'orders', 'wallet'] : Object.keys(routes).slice(0, 4))}
     <button class="nav-btn m" id="more-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>More</span></button>
   </nav>
 `;

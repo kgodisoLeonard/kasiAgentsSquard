@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class AgentGatewayTest {
   private final Fixture f = new Fixture();
   private final AtomicBoolean enabled = new AtomicBoolean(true);
-  private final AgentGateway agent = new AgentGateway(f.mandates::snapshot, f.orders, f.suppliers, this::inventory, enabled::get, f.audit);
+  private final AgentGateway agent = new AgentGateway(f.mandates::snapshot, f.orders, f.suppliers, this::inventory, enabled::get, f.audit, f.catalog, f::user);
 
   private List<Product> inventory() {
     Product p = new Product(); p.setId("prod_1"); p.setName("Maize Meal (10kg)"); p.setQty(2); p.setLowStock(10);

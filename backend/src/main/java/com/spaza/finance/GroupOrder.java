@@ -11,7 +11,7 @@ public class GroupOrder {
 
   public static class Share {
     final String ownerId, ownerName; final int quantity; final BigDecimal goods, delivery, total;
-    ShareStatus status = ShareStatus.PENDING; String blockedReason, escrowId, decidedAt; boolean deliveryConfirmed;
+    ShareStatus status = ShareStatus.PENDING; String blockedReason, escrowId, decidedAt, fundedBy; boolean deliveryConfirmed;
     Share(String ownerId, String ownerName, int quantity, BigDecimal goods, BigDecimal delivery) {
       this.ownerId = ownerId; this.ownerName = ownerName; this.quantity = quantity; this.goods = goods; this.delivery = delivery; this.total = goods.add(delivery);
     }
@@ -22,7 +22,7 @@ public class GroupOrder {
       Map<String,Object> v = new LinkedHashMap<>();
       v.put("ownerId", ownerId); v.put("ownerName", ownerName); v.put("quantity", quantity); v.put("goods", goods);
       v.put("delivery", delivery); v.put("total", total); v.put("status", status); v.put("blockedReason", blockedReason);
-      v.put("escrowTx", escrowId); v.put("deliveryConfirmed", deliveryConfirmed); v.put("decidedAt", decidedAt);
+      v.put("escrowTx", escrowId); v.put("deliveryConfirmed", deliveryConfirmed); v.put("decidedAt", decidedAt); v.put("fundedBy", fundedBy);
       return v;
     }
   }

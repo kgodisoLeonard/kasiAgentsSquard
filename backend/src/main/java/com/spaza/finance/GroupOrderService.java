@@ -127,6 +127,33 @@ public class GroupOrderService {
     return s;
   }
 
+  /**
+   * Automatic restock: a single-shop order placed by the agent under the owner's standing restock rule in their mandate.
+   * The rule is the owner's pre-approval for exactly this product, quantity and supplier; payment still passes the full
+   * mandate check (caps, allow-list, monthly agent budget) and is held in escrow until the owner confirms delivery.
+   */
+  public synchronized GroupOrder placeStandingOrder(String ownerId, String ownerName, boolean identityVerified, String supplierId, String product,
+                                                    BigDecimal unitPrice, int quantity, String agentId, String rule) {
+    GroupOrder o = draft(new DraftRequest(supplierId, product, unitPrice, quantity, BigDecimal.ZERO, Duration.ofHours(1),
+        List.of(new MemberLine(ownerId, ownerName, quantity)), "Automatic restock: " + rule), ActorType.AGENT, agentId);
+    Share s = o.shares.get(0);
+    if (!identityVerified) {
+      s.status = ShareStatus.BLOCKED; s.blockedReason = "Identity verification (Level 2) is required before placing orders"; s.decidedAt = clock.instant().toString();
+      event(o, ActorType.AGENT, agentId, "SHARE_BLOCKED", Map.of("reason", "LEVEL_2_REQUIRED"), Map.of());
+      return o;
+    }
+    event(o, ActorType.AGENT, agentId, "SHARE_PREAPPROVED_BY_MANDATE_RULE", Map.of("ownerId", ownerId, "rule", rule), Map.of("amount", s.total));
+    fund(o, s, "AGENT:" + agentId);
+    settleIfReady(o);
+    return o;
+  }
+
+  /** An order for this product that the owner is part of and that is still in progress (not completed, cancelled or refunded). */
+  public synchronized Optional<GroupOrder> openOrderForMember(String ownerId, String product) {
+    EnumSet<Status> active = EnumSet.of(Status.COLLECTING, Status.FUNDED, Status.ACCEPTED, Status.IN_TRANSIT, Status.DELIVERED_PENDING_CONFIRMATION, Status.DISPUTED);
+    return orders.values().stream().filter(o -> active.contains(o.status) && o.product.equalsIgnoreCase(product) && o.share(ownerId).isPresent()).findFirst();
+  }
+
   public synchronized Share declineShare(String orderId, HumanActor member) {
     GroupOrder o = get(orderId);
     Share s = memberShare(o, member.userId());
@@ -148,11 +175,11 @@ public class GroupOrderService {
     String address = suppliers.find(o.supplierId).orElseThrow().payoutAddress();
     try {
       SimulatedXrplLedger.Tx tx = ledger.createEscrow(SimulatedXrplLedger.walletOf(s.ownerId), address, s.total, o.id + ":" + s.ownerId);
-      s.status = ShareStatus.FUNDED; s.escrowId = tx.hash(); s.blockedReason = null;
+      s.status = ShareStatus.FUNDED; s.escrowId = tx.hash(); s.blockedReason = null; s.fundedBy = initiatedBy;
       event(o, ActorType.SYSTEM, "ledger", "ESCROW_CREATED", Map.of("ownerId", s.ownerId, "amount", s.total, "destination", address, "initiatedBy", initiatedBy), tx.view());
       flagRisk(o, s);
     } catch (RuntimeException e) {
-      mandates.release(s.ownerId, s.total);
+      mandates.release(s.ownerId, s.total, initiatedBy.startsWith("AGENT:"));
       s.status = ShareStatus.BLOCKED; s.blockedReason = e.getMessage();
       event(o, ActorType.SYSTEM, "ledger", "PAYMENT_FAILED", Map.of("ownerId", s.ownerId, "amount", s.total), Map.of("error", String.valueOf(e.getMessage())));
     }
@@ -218,7 +245,7 @@ public class GroupOrderService {
     for (Share s : o.shares) {
       if (s.status != ShareStatus.FUNDED) continue;
       SimulatedXrplLedger.Tx tx = ledger.cancelEscrow(s.escrowId, "refund:" + o.id);
-      mandates.release(s.ownerId, s.total);
+      mandates.release(s.ownerId, s.total, s.fundedBy != null && s.fundedBy.startsWith("AGENT:"));
       s.status = ShareStatus.REFUNDED;
       event(o, ActorType.SYSTEM, "escrow", "ESCROW_REFUNDED", Map.of("ownerId", s.ownerId, "reason", reason), tx.view());
     }
