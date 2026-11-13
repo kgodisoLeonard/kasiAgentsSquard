@@ -103,6 +103,14 @@ public class InventoryService {
     return copy(store(row));
   }
 
+  /** Deletes a product from this shop's stock list. Returns the deleted product, or empty if it is not in this shop. */
+  public synchronized Optional<Product> delete(String ownerId, String productId) {
+    Product p = shop(ownerId).remove(productId);
+    if (p == null) return Optional.empty();
+    writer.submit("products", () -> { if (products.existsById(productId)) products.deleteById(productId); });
+    return Optional.of(copy(p));
+  }
+
   static Product copy(Product p) {
     Product c = new Product();
     c.setId(p.getId()); c.setOwnerId(p.getOwnerId()); c.setName(p.getName()); c.setBarcode(p.getBarcode()); c.setCategory(p.getCategory());

@@ -66,15 +66,15 @@ body::before {
     radial-gradient(800px 500px at 100% 0%, hsla(262 83% 70% / 0.12), transparent 60%),
     radial-gradient(700px 500px at 50% 110%, hsla(38 95% 58% / 0.08), transparent 60%);
 }
-.product-image { width: 100%; height: 116px; border-radius: 10px; background-image: url('/assets/stock-atlas.png'); background-size: 300% 300%; background-repeat: no-repeat; background-color: #f8f7f3; border: 1px solid rgba(19,35,29,.08); }
-.img-meat { background-position: 0 0; }
-.img-bread { background-position: 50% 0; }
-.img-milk { background-position: 100% 0; }
-.img-maize { background-position: 0 50%; }
-.img-cola { background-position: 50% 50%; }
-.img-maize-small { background-position: 100% 50%; }
-.img-dish { background-position: 0 100%; }
-.img-tea { background-position: 50% 100%; }
+.product-image { width: 100%; height: 116px; border-radius: 10px; background-color: #f8f7f3; background-size: cover; background-position: center; background-repeat: no-repeat; border: 1px solid rgba(19,35,29,.08); }
+.product-image.no-photo { display: grid; place-items: center; font-size: 40px; }
+.product .product-image { height: 104px; margin-bottom: 8px; }
+.stock-item .product-image.no-photo { font-size: 22px; }
+.cart-item .product-image { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 8px; font-size: 20px; }
+.product-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.btn-danger-ghost { color: var(--rose); border: 1px solid hsla(0 70% 60% / .35); background: transparent; }
+.btn-danger-ghost:hover { background: hsla(0 70% 60% / .08); }
+.photo-credits { font-size: 11px; color: var(--muted); }
 button { font: inherit; color: inherit; cursor: pointer; border: none; background: none; }
 input, select { font: inherit; }
 .mono { font-family: var(--mono); }

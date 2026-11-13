@@ -1,4 +1,4 @@
-import { esc, money, toast, icons, emojiFor } from '../ui.js';
+import { esc, money, toast, icons, productThumb } from '../ui.js';
 
 /**
  * Till. A customer's order is an open order on the server: adding an item takes it off the shelf immediately
@@ -63,11 +63,11 @@ export async function renderPOS(root, api, alive) {
     const list = inventory.filter((p) => p.name.toLowerCase().includes(f) || p.barcode.includes(f) || (p.category || '').toLowerCase().includes(f));
     $('#catalog').innerHTML = list.map((p) => `
       <div class="product ${p.qty <= p.lowStock ? 'low' : ''} ${p.qty <= 0 ? 'out' : ''}" data-id="${esc(p.id)}" title="Click to update price">
-        <div class="emoji">${emojiFor(p.category)}</div>
+        ${productThumb(p.name, p.category)}
         <div class="name">${esc(p.name)}</div>
         <div class="meta">${esc(p.barcode)}</div>
         <div class="foot"><span class="price">${money(p.price)}</span><span class="stock">${p.qty <= 0 ? 'Sold out' : p.qty + ' left'}</span></div>${p.onOrder ? `<div class="on-order" title="The agent's restock order ${esc(p.onOrder.orderId)} is ${esc(p.onOrder.status.replaceAll('_', ' ').toLowerCase())}">On order: ${p.onOrder.quantity}</div>` : ''}
-        <div style="display:flex;gap:6px;margin-top:8px"><button type="button" class="btn btn-ghost btn-sm" data-edit-price="${esc(p.id)}">Update price</button><button type="button" class="btn btn-primary btn-sm" data-add="${esc(p.id)}" ${p.qty <= 0 ? 'disabled' : ''}>Add</button></div>
+        <div class="product-actions"><button type="button" class="btn btn-ghost btn-sm" data-edit-price="${esc(p.id)}">Update price</button><button type="button" class="btn btn-danger-ghost btn-sm" data-remove-stock="${esc(p.id)}" aria-label="Remove ${esc(p.name)} stock">Remove</button><button type="button" class="btn btn-primary btn-sm" data-add="${esc(p.id)}" ${p.qty <= 0 ? 'disabled' : ''}>Add</button></div>
       </div>`).join('') || `<div class="empty" style="grid-column:1/-1"><div class="big">🔍</div>No products match “${esc(filter)}”</div>`;
   }
 
@@ -76,7 +76,7 @@ export async function renderPOS(root, api, alive) {
     const count = lines.reduce((n, l) => n + l.qty, 0);
     $('#cart').innerHTML = lines.length ? lines.map((l) => `
       <div class="cart-item">
-        <div style="font-size:22px">${emojiFor(l.category)}</div>
+        ${productThumb(l.name, l.category)}
         <div class="info"><b>${esc(l.name)}</b><span>${money(l.unitPrice)} each</span></div>
         <div class="qty"><button data-dec="${esc(l.productId)}" aria-label="Remove one ${esc(l.name)}">−</button><span>${l.qty}</span><button data-inc="${esc(l.productId)}" aria-label="Add one ${esc(l.name)}">+</button></div>
       </div>`).join('') : `<div class="empty"><div class="big">🛒</div>No items yet</div>`;
@@ -151,7 +151,7 @@ export async function renderPOS(root, api, alive) {
     inventory = (await api.inventory()).inventory;
   });
 
-  $('#catalog').addEventListener('click', (e) => { const edit = e.target.closest('[data-edit-price]'); if (edit) return openPriceModal(api, byId(edit.dataset.editPrice), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); const addButton = e.target.closest('[data-add]'); if (addButton) return add(addButton.dataset.add); const card = e.target.closest('[data-id]'); if (card && !e.target.closest('button')) openPriceModal(api, byId(card.dataset.id), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); });
+  $('#catalog').addEventListener('click', (e) => { const rm = e.target.closest('[data-remove-stock]'); if (rm) return openRemoveModal(api, byId(rm.dataset.removeStock), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); const edit = e.target.closest('[data-edit-price]'); if (edit) return openPriceModal(api, byId(edit.dataset.editPrice), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); const addButton = e.target.closest('[data-add]'); if (addButton) return add(addButton.dataset.add); const card = e.target.closest('[data-id]'); if (card && !e.target.closest('button')) openPriceModal(api, byId(card.dataset.id), async () => { inventory = (await api.inventory()).inventory; drawCart(); }); });
   $('#cart').addEventListener('click', (e) => {
     const inc = e.target.closest('[data-inc]'); const dec = e.target.closest('[data-dec]');
     if (inc) add(inc.dataset.inc);
@@ -232,6 +232,39 @@ function openProductModal(api, onSaved) {
     } catch (err) { toast(err.message, 'error'); }
   });
   bg.querySelector('input').focus();
+}
+
+/** Remove stock: write off some units (damaged, expired, stolen), or delete the product from the stock list. */
+function openRemoveModal(api, product, onSaved) {
+  if (!product) return;
+  const bg = document.createElement('div'); bg.className = 'modal-bg';
+  bg.innerHTML = `<form class="modal stack" id="remove-form">
+      <div><h3 style="font-size:19px">Remove stock</h3><p class="sub" style="margin:4px 0 0">${esc(product.name)} · ${product.qty} in stock</p></div>
+      <div class="grid g-2" style="gap:12px">
+        <div class="field"><label for="rm-qty">Units to remove</label><input id="rm-qty" class="input" name="quantity" type="number" min="1" max="${product.qty}" value="1" ${product.qty <= 0 ? 'disabled' : ''} required></div>
+        <div class="field"><label for="rm-reason">Reason</label><select id="rm-reason" class="input" name="reason"><option>Expired</option><option>Damaged</option><option>Stolen</option><option>Own use</option><option>Count correction</option></select></div>
+      </div>
+      <p class="sub" style="margin:0">Removed units do not count as income.</p>
+      <div class="row" style="gap:10px;justify-content:flex-end;flex-wrap:wrap">
+        <button type="button" class="btn btn-danger-ghost" id="rm-delete">Delete product</button>
+        <button type="button" class="btn btn-ghost" id="rm-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" ${product.qty <= 0 ? 'disabled' : ''}>Remove units</button>
+      </div></form>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.querySelector('#rm-cancel').onclick = close;
+  bg.onclick = (e) => { if (e.target === bg) close(); };
+  bg.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    try { const r = await api.writeOffStock(product.id, Number(f.get('quantity')), f.get('reason')); toast(r.message); close(); await onSaved(); }
+    catch (err) { toast(err.message, 'error'); }
+  };
+  bg.querySelector('#rm-delete').onclick = async () => {
+    if (!confirm(`Delete ${product.name} from your stock list? This cannot be undone.`)) return;
+    try { const r = await api.deleteProduct(product.id); toast(r.message); close(); await onSaved(); }
+    catch (err) { toast(err.message, 'error'); }
+  };
+  bg.querySelector('input:not([disabled])')?.focus();
 }
 
 function openPriceModal(api, product, onSaved) {

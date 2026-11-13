@@ -40,16 +40,25 @@ export function toggleTheme() {
   document.documentElement.dataset.theme = next;
   return next;
 }
-export const productImage = (name = '') => {
-  const n = name.toLowerCase();
-  if (n.includes('meat')) return 'img-meat';
-  if (n.includes('milk')) return 'img-milk';
-  if (n.includes('coca')) return 'img-cola';
-  if (n.includes('dish')) return 'img-dish';
-  if (n.includes('tea')) return 'img-tea';
-  if (n.includes('maize')) return n.includes('2.5') ? 'img-maize-small' : 'img-maize';
-  return 'img-bread';
-};
+/** Products with a photo in /assets/products (see /assets/products/CREDITS.md for licences and authors). */
+const PHOTOS = new Set(["2-minute-noodles-5-pack", "ace-maize-meal-2-5kg", "airtime-voucher-r10", "albany-superior-bread", "atchar-380g", "baked-beans-410g", "bath-soap-175g", "boerewors-1kg", "brown-bread-700g", "cake-flour-2-5kg", "candles-6-pack", "chakalaka-410g", "chicken-pieces-2kg", "chocolate-bar-80g", "coca-cola-2l", "eggs-18", "energy-drink-500ml", "five-roses-tea-100-bags", "full-cream-milk-2l", "instant-coffee-100g", "lollipops-each", "maas-2l", "maize-meal-10kg", "maize-snacks-100g", "matches-10-boxes", "minced-meat-kg", "orange-juice-blend-1-5l", "paraffin-1l", "peanut-butter-400g", "pilchards-in-tomato-400g", "polony-1kg", "potato-chips-125g", "rice-2kg", "russians-6-pack", "samp-2kg", "soup-powder-400g", "still-water-1-5l", "sugar-2-5kg", "sunflower-oil-2l", "sunlight-dishwashing-liquid-750ml", "toilet-paper-4-rolls", "vetkoek-mix-1kg", "washing-powder-1kg", "white-bread-700g"]);
+const slugOf = (name = '') => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+/** Photo URL for a product name; also matches short names like "Maize Meal" to "Maize Meal (10kg)". Null if none. */
+export function productPhoto(name = '') {
+  const s = slugOf(name);
+  if (PHOTOS.has(s)) return `/assets/products/${s}.jpg`;
+  const prefix = [...PHOTOS].find((p) => s && p.startsWith(s + '-'));
+  return prefix ? `/assets/products/${prefix}.jpg` : null;
+}
+/** Product picture: the real photo when there is one, otherwise the category emoji. */
+export function productThumb(name, category, cls = '') {
+  const url = productPhoto(name);
+  return url
+    ? `<div class="product-image ${cls}" role="img" aria-label="${esc(name)}" style="background-image:url('${url}')"></div>`
+    : `<div class="product-image no-photo ${cls}" role="img" aria-label="${esc(name)}">${emojiFor(category)}</div>`;
+}
+/** Kept for older callers. */
+export const productImage = () => '';
 
 export const icons = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',

@@ -39,6 +39,7 @@ final class Api {
   Res get(String path) { return send("GET", path, null); }
   Res post(String path, Object body) { return send("POST", path, body); }
   Res put(String path, Object body) { return send("PUT", path, body); }
+  Res delete(String path) { return send("DELETE", path, null); }
 
   private Res send(String method, String path, Object body) {
     try {

@@ -2,6 +2,7 @@ package com.spaza.controller;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.spaza.agent.AgentGateway;
+import com.spaza.audit.AuditLog;
 import com.spaza.agent.LlmAgent;
 import com.spaza.finance.GroupOrder;
 import com.spaza.finance.GroupOrderService;
@@ -42,6 +43,7 @@ public class PosController {
     private final LlmAgent llm;
     private final WriteBehind writer;
     private final com.spaza.repository.AgentPolicy humanRules;
+    private final AuditLog audit;
     /** Each shop's open customer order and sales, loaded from the database on first use; writes go to the writer thread. */
     private final Map<String, Optional<TillOrder>> openOrders = new HashMap<>();
     private final Map<String, List<Sale>> salesByOwner = new HashMap<>();
@@ -50,7 +52,8 @@ public class PosController {
     private final Set<String> agentBusy = Collections.synchronizedSet(new HashSet<>());
 
     public PosController(InventoryService inventory, TillOrderRepository tillOrders, SaleRepository sales, AgentGateway agent, MandateService mandates,
-                         GroupOrderService groupOrders, LlmAgent llm, WriteBehind writer, com.spaza.repository.AgentPolicy humanRules) {
+                         GroupOrderService groupOrders, LlmAgent llm, WriteBehind writer, com.spaza.repository.AgentPolicy humanRules, AuditLog audit) {
+        this.audit = audit;
         this.humanRules = humanRules;
         this.inventory = inventory; this.tillOrders = tillOrders; this.sales = sales; this.agent = agent; this.mandates = mandates;
         this.groupOrders = groupOrders; this.llm = llm; this.writer = writer;
@@ -305,6 +308,42 @@ public class PosController {
         return inventory.setPrice(ownerId, id, price)
                 .<ResponseEntity<?>>map(p -> ResponseEntity.ok(Map.of("success", true, "item", productView(ownerId, p))))
                 .orElseGet(() -> ResponseEntity.status(404).body(Map.of("error", "Product not found")));
+    }
+
+    /** Write off units that left the shelf without a sale (damaged, expired, stolen). They do not count as income. */
+    @PostMapping("/inventory/{id}/remove")
+    public Map<String, Object> writeOff(@PathVariable String id, @RequestBody Map<String, Object> body, HttpServletRequest req) {
+        String ownerId = AuthInterceptor.current(req).id();
+        int qty = body.get("quantity") instanceof Number n ? n.intValue() : 0;
+        String reason = String.valueOf(body.getOrDefault("reason", "")).trim();
+        if (reason.isEmpty()) reason = "Not given";
+        if (reason.length() > 200) reason = reason.substring(0, 200);
+        inventory.find(ownerId, id).orElseThrow(() -> new NoSuchElementException("Product not found"));
+        if (qty < 1) throw new IllegalArgumentException("Quantity to remove must be at least 1");
+        Product p = inventory.take(ownerId, id, qty);
+        audit.record(AuditLog.ActorType.HUMAN, ownerId, "STOCK_WRITTEN_OFF", Map.of("productId", id, "product", p.getName(), "quantity", qty, "reason", reason),
+            Map.of("stockLeft", p.getQty(), "valueAtCost", qty * p.getCost()));
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("success", true); r.put("item", productView(ownerId, p));
+        r.put("message", "Removed " + qty + " × " + p.getName() + " (" + reason + "). " + p.getQty() + " left.");
+        restockCheck(ownerId, p).ifPresent(x -> r.put("restock", x));   // a write-off can drop stock below a restock rule too
+        return r;
+    }
+
+    /** Delete a product from the shop's stock list. Not allowed while it is in a customer's cart or a restock order is on the way. */
+    @DeleteMapping("/inventory/{id}")
+    public synchronized Map<String, Object> deleteProduct(@PathVariable String id, HttpServletRequest req) {
+        String ownerId = AuthInterceptor.current(req).id();
+        Product p = inventory.find(ownerId, id).orElseThrow(() -> new NoSuchElementException("Product not found"));
+        if (open(ownerId).map(o -> lines(o).containsKey(id)).orElse(false))
+            throw new IllegalStateException(p.getName() + " is in the open customer order. Remove it from the order first.");
+        groupOrders.openOrderForMember(ownerId, p.getName()).ifPresent(o -> {
+            throw new IllegalStateException("A restock order for " + p.getName() + " (" + o.id() + ") is on the way. Delete it after the delivery is confirmed.");
+        });
+        inventory.delete(ownerId, id);
+        boolean hadRule = mandates.restockRules(ownerId).stream().anyMatch(r -> r.product().equalsIgnoreCase(p.getName()));
+        audit.record(AuditLog.ActorType.HUMAN, ownerId, "PRODUCT_REMOVED", Map.of("productId", id, "product", p.getName()), Map.of("stockAtRemoval", p.getQty()));
+        return Map.of("success", true, "message", p.getName() + " removed from your stock" + (hadRule ? ". Its restock rule no longer applies; edit it under Mandates." : "."));
     }
 
     /** One-step sale (API clients). The POS screen uses the customer-order flow above. */
