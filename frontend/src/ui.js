@@ -59,6 +59,12 @@ export function productThumb(name, category, cls = '') {
 }
 /** Kept for older callers. */
 export const productImage = () => '';
+/** Group-order updates (same feed every member shop sees for its orders). */
+export function updatesList(updates) {
+  const icon = { INVITED: '📨', SHARE_PAID: '💳', SHARE_DECLINED: '✋', ORDER_FUNDED: '🔒', ACCEPTED: '👍', DISPATCHED: '🚚', DELIVERED: '📦', MEMBER_CONFIRMED: '✅', COMPLETED: '🎉', CANCELLED: '↩️', REFUNDED: '↩️', DISPUTED: '⚠️', NEW_ORDER: '🧾', PAID: '💰' };
+  return updates.length ? updates.slice(0, 12).map((u) => `<div class="update-row"><span class="update-icon">${icon[u.type] || '•'}</span><span>${esc(u.message)}<br><small>${new Date(u.at).toLocaleString()}</small></span></div>`).join('')
+    : '<div class="empty">No updates yet. You will see every step of your group orders here.</div>';
+}
 
 export const icons = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>',

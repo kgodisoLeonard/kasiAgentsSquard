@@ -67,6 +67,24 @@ public final class ProductCatalog {
     e("Matches (10 boxes)", "Household", "600108737063", 12.00, "SUP-002", "7.50"),
     e("Airtime Voucher R10", "Services", "600199900010", 10.00, "SUP-002", "9.50"));
 
+  /** DEMO suppliers added for the connected-shops demo: id, business name, the categories they stock, and their price factor. */
+  public record DemoSupplier(String id, String name, String email, boolean verified, List<String> categories, double priceFactor) {}
+  public static final List<DemoSupplier> DEMO_SUPPLIERS = List.of(
+    new DemoSupplier("SUP-003", "Kasi Fresh Bakery", "orders@kasifresh.local", true, List.of("Bakery"), 0.97),
+    new DemoSupplier("SUP-004", "Mzansi Dairy Distributors", "sales@mzansidairy.local", true, List.of("Dairy"), 1.02),
+    new DemoSupplier("SUP-005", "Soweto Beverage & Snack Wholesalers", "trade@sowetobev.local", true, List.of("Beverages", "Snacks"), 0.98),
+    new DemoSupplier("SUP-006", "Township Household Supplies", "orders@townshiphousehold.local", true, List.of("Household", "Services"), 1.01),
+    // Deliberately UNVERIFIED: listed and can sign in, but cannot receive orders or payments until a reviewer verifies it.
+    new DemoSupplier("SUP-007", "QuickStock Wholesale", "hello@quickstock.local", false, List.of("Staples", "Groceries"), 0.90));
+
+  /** Wholesale prices for the demo suppliers above, derived from the cheapest existing price of each product in their categories. */
+  public static Map<String,BigDecimal> demoSupplierPrices(DemoSupplier s) {
+    Map<String,BigDecimal> out = new LinkedHashMap<>();
+    for (Entry e : ENTRIES) if (s.categories().contains(e.category()))
+      out.put(e.name(), BigDecimal.valueOf(e.cheapestCost() * s.priceFactor()).setScale(2, java.math.RoundingMode.HALF_UP));
+    return out;
+  }
+
   public static List<Entry> all() { return ENTRIES; }
 
   public static Optional<Entry> find(String name) {

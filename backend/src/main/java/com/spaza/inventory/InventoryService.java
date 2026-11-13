@@ -1,10 +1,10 @@
 package com.spaza.inventory;
 
 import com.spaza.model.Product;
+import com.spaza.persistence.StateStore;
 import com.spaza.persistence.WriteBehind;
 import com.spaza.repository.ProductRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -20,10 +20,11 @@ import java.util.*;
 public class InventoryService {
   private final ProductRepository products;
   private final WriteBehind writer;
+  private final StateStore state;
   /** owner id -> (product id -> product), for shops loaded so far */
   private final Map<String,Map<String,Product>> shops = new HashMap<>();
 
-  public InventoryService(ProductRepository products, WriteBehind writer) { this.products = products; this.writer = writer; }
+  public InventoryService(ProductRepository products, WriteBehind writer, StateStore state) { this.products = products; this.writer = writer; this.state = state; }
 
   private Map<String,Product> shop(String ownerId) {
     return shops.computeIfAbsent(ownerId, id -> {
@@ -119,34 +120,35 @@ public class InventoryService {
   }
 
   /**
-   * DEMO DATA: gives a shop a random selection of catalog products with random stock levels and slightly varied
-   * shelf prices. The essentials (bread, milk, maize meal) are always included. Does nothing if the shop has stock.
-   * Seeded per owner id, so the same owner always gets the same starting shelf.
+   * DEMO DATA: every shop stocks the same catalog products, each with its own random quantity, reorder level and a
+   * slightly different shelf price. A new shop gets all of them; an existing shop gets any catalog products it is missing,
+   * once (recorded in the state store, so a product the owner later deletes is not added back). Random values are seeded
+   * per owner and product, so the same shop always gets the same starting shelf.
    */
-  @Transactional
+  // Not @Transactional on purpose: saveAll commits in its own transaction BEFORE the shop's cache is cleared below,
+  // so a request arriving during seeding can never cache the shop as empty (the commit used to happen after the clear).
   public synchronized int seedRandomStock(String ownerId) {
-    if ((shops.containsKey(ownerId) && !shops.get(ownerId).isEmpty()) || products.existsByOwnerId(ownerId)) return 0;
-    Random rnd = new Random(ownerId.hashCode());
-    List<ProductCatalog.Entry> pool = new ArrayList<>(ProductCatalog.all());
-    Collections.shuffle(pool, rnd);
-    int extra = 22 + rnd.nextInt(10);
-    List<ProductCatalog.Entry> chosen = new ArrayList<>();
-    for (ProductCatalog.Entry e : ProductCatalog.all()) if (ProductCatalog.ESSENTIALS.contains(e.name())) chosen.add(e);
-    for (ProductCatalog.Entry e : pool) { if (chosen.size() >= ProductCatalog.ESSENTIALS.size() + extra) break; if (!chosen.contains(e)) chosen.add(e); }
+    if (state.raw("full-shelf").containsKey(ownerId)) return 0;
+    Set<String> have = new HashSet<>();
+    products.findByOwnerIdOrderByNameAsc(ownerId).forEach(p -> have.add(p.getName().toLowerCase(Locale.ROOT)));
     List<Product> rows = new ArrayList<>();
-    for (ProductCatalog.Entry e : chosen) {
+    for (ProductCatalog.Entry e : ProductCatalog.all()) {
+      if (have.contains(e.name().toLowerCase(Locale.ROOT))) continue;
+      Random rnd = new Random((ownerId + "|" + e.name()).hashCode());
       Product p = new Product();
       p.setId(newId()); p.setOwnerId(ownerId); p.setName(e.name()); p.setBarcode(e.barcode()); p.setCategory(e.category());
       int low = 5 + rnd.nextInt(11);
       p.setLowStock(low);
-      p.setQty(rnd.nextInt(10) < 2 ? rnd.nextInt(low) : low + rnd.nextInt(45));   // ~20% start below their reorder level
+      boolean essential = ProductCatalog.ESSENTIALS.contains(e.name());              // bread, milk, maize start healthy
+      p.setQty(!essential && rnd.nextInt(10) < 2 ? rnd.nextInt(low) : low + rnd.nextInt(45));   // ~20% of the rest start low
       double shelf = e.shelfPrice() * (0.95 + rnd.nextDouble() * 0.15);
       p.setPrice(Math.round(shelf * 2) / 2.0);                                     // nearest 50c
       p.setCost(Math.round(e.cheapestCost() * 100) / 100.0);
       rows.add(p);
     }
-    products.saveAll(rows);   // seeding is synchronous: the shop's stock exists before anyone uses it
-    shops.remove(ownerId);    // the next use loads the seeded rows
+    if (!rows.isEmpty()) products.saveAll(rows);   // synchronous: the shop's stock exists before anyone uses it
+    state.save("full-shelf", ownerId, ProductCatalog.all().size());
+    shops.remove(ownerId);                          // the next use loads the rows
     return rows.size();
   }
 

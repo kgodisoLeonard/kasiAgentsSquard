@@ -38,6 +38,9 @@ public class GroupOrderService {
   private final Duration deliveryWindow;
   private final Map<String,GroupOrder> orders = new LinkedHashMap<>();
   private final List<Consumer<GroupOrder>> completionListeners = new ArrayList<>();
+  /** Every order event (drafted, share paid, funded, dispatched, confirmed, completed, ...) for the members' update feeds. */
+  public record OrderEvent(GroupOrder order, String action, String actorType, String actorId, Map<String,?> inputs) {}
+  private final List<Consumer<OrderEvent>> eventListeners = new ArrayList<>();
   private final StateStore store;
   private int sequence = 1000;
   static final String KIND = "group-order";
@@ -59,6 +62,7 @@ public class GroupOrderService {
   private void persist(GroupOrder o) { store.save(KIND, o.id, GroupOrderState.of(o)); }
 
   public void onCompleted(Consumer<GroupOrder> listener) { completionListeners.add(listener); }
+  public void onEvent(Consumer<OrderEvent> listener) { eventListeners.add(listener); }
 
   // ---------------------------------------------------------------- drafting
 
@@ -375,5 +379,8 @@ public class GroupOrderService {
     var entry = audit.record(type, actor, action, inputs, out);
     o.timeline.add(Map.of("at", String.valueOf(entry.getTimestamp()), "actor", type + ":" + actor, "action", action, "auditSeq", entry.getSeq()));
     persist(o);   // every change to an order is followed by an event, so this writes each new state through
+    for (Consumer<OrderEvent> l : eventListeners) {
+      try { l.accept(new OrderEvent(o, action, type.name(), actor, inputs)); } catch (RuntimeException ignored) { /* a feed problem never blocks an order */ }
+    }
   }
 }

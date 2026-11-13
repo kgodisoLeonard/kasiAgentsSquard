@@ -23,8 +23,15 @@ public class SupplierCatalog {
     void save(Item item);
   }
 
-  static final List<Item> DEMO_PRICES = ProductCatalog.all().stream()
-      .flatMap(e -> e.wholesale().entrySet().stream().map(w -> new Item(w.getKey(), e.name(), w.getValue()))).toList();
+  static final List<Item> DEMO_PRICES = demoPrices();
+
+  private static List<Item> demoPrices() {
+    List<Item> list = new ArrayList<>(ProductCatalog.all().stream()
+        .flatMap(e -> e.wholesale().entrySet().stream().map(w -> new Item(w.getKey(), e.name(), w.getValue()))).toList());
+    for (ProductCatalog.DemoSupplier s : ProductCatalog.DEMO_SUPPLIERS)
+      ProductCatalog.demoSupplierPrices(s).forEach((product, price) -> list.add(new Item(s.id(), product, price)));
+    return List.copyOf(list);
+  }
 
   private final Store store;
   private final List<Item> items = new ArrayList<>();
@@ -35,9 +42,14 @@ public class SupplierCatalog {
   /** Database-backed. An empty table is seeded once with the demo prices. */
   public SupplierCatalog(Store store) {
     this.store = store;
-    List<Item> loaded = store == null ? List.of() : store.load();
-    if (store != null && loaded.isEmpty()) { DEMO_PRICES.forEach(store::save); loaded = DEMO_PRICES; }
-    items.addAll(store == null ? DEMO_PRICES : loaded);
+    List<Item> loaded = store == null ? DEMO_PRICES : new ArrayList<>(store.load());
+    if (store != null) {
+      // Add demo price lines that are missing (first start, or a new demo supplier). Existing lines are never overwritten.
+      for (Item d : DEMO_PRICES) if (loaded.stream().noneMatch(i -> i.supplierId().equals(d.supplierId()) && i.product().equalsIgnoreCase(d.product()))) {
+        store.save(d); loaded.add(d);
+      }
+    }
+    items.addAll(loaded);
   }
 
   public synchronized List<Item> all() { return List.copyOf(items); }

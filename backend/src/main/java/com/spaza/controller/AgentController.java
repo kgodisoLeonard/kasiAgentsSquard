@@ -65,6 +65,7 @@ public class AgentController {
     AuthUser u = AuthInterceptor.current(req);
     Map<String,Object> scan = agent.execute("DETECT_SHORTAGES", Map.of(), u.id());
     List<Map<String,Object>> recommendations = new ArrayList<>();
+    int drafted = 0;   // at most one new group-order draft per scan, so a dashboard visit never floods the other shops
     for (Product p : store.list(u.id())) {
       if (p.getQty() > policy.rules(u.id()).warningThreshold()) continue;
       Optional<Map<String,Object>> offer = platform.offerFor(p.getName());
@@ -76,13 +77,14 @@ public class AgentController {
       rec.put("supplierId", o.get("id")); rec.put("supplierName", o.get("name")); rec.put("offerProduct", o.get("product"));
       rec.put("unitPrice", o.get("price")); rec.put("minOrder", o.get("minOrder")); rec.put("confidence", "HIGH");
       rec.put("draftParams", draftParams(u, o));
-      boolean auto = policy.rules(u.id()).blocks(p.getQty()) == null;
+      boolean auto = drafted == 0 && policy.rules(u.id()).blocks(p.getQty()) == null;
       var existing = orders.openOrderForMember(u.id(), p.getName()).or(() -> orders.openOrderFor(String.valueOf(o.get("id")), String.valueOf(o.get("product"))));
       if (existing.isPresent()) { rec.put("status", "ORDER_OPEN"); rec.put("orderId", existing.get().id()); }
       else if (auto) {
-        Map<String,Object> drafted = agent.execute("DRAFT_GROUP_ORDER", draftParams(u, o), u.id());
-        rec.put("status", Boolean.TRUE.equals(drafted.get("allowed")) ? "AGENT_DRAFTED" : "DRAFT_BLOCKED");
-        rec.put("agentResult", drafted);
+        Map<String,Object> result = agent.execute("DRAFT_GROUP_ORDER", draftParams(u, o), u.id());
+        rec.put("status", Boolean.TRUE.equals(result.get("allowed")) ? "AGENT_DRAFTED" : "DRAFT_BLOCKED");
+        rec.put("agentResult", result);
+        drafted++;
       } else rec.put("status", "RECOMMENDED");
       recommendations.add(rec);
     }

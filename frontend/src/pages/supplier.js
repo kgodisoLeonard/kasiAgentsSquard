@@ -1,7 +1,7 @@
-import { esc, money, toast, statusChip, when, simulatedBadge } from '../ui.js';
+import { esc, money, toast, statusChip, when, simulatedBadge, updatesList } from '../ui.js';
 
 export async function renderSupplier(root, api, alive) {
-  const [orderData, directoryData, priceData] = await Promise.all([api.groupOrders(), api.directory(), api.myPrices()]);
+  const [orderData, directoryData, priceData, updateData] = await Promise.all([api.groupOrders(), api.directory(), api.myPrices(), api.updates()]);
   if (!alive()) return;
   let orders = orderData.orders;
   let prices = priceData.prices;
@@ -16,6 +16,7 @@ export async function renderSupplier(root, api, alive) {
     <div class="card" style="margin-top:20px"><div class="card-head"><div><h3>My price list</h3><p class="sub">Wholesale price per unit. The agent orders at these prices, but never above a shop owner's own price limit.</p></div><span class="chip green" id="price-count"></span></div>
       <div id="price-list" class="price-list"></div>
       <form id="add-price" class="price-add"><input class="input" name="product" placeholder="Add a product, e.g. Sugar (2.5kg)" maxlength="120" required><input class="input" name="unitPrice" type="number" min="0.01" step="0.01" placeholder="Price (R)" required><button class="btn btn-primary btn-sm" type="submit">Add</button></form></div>
+    <div class="card" style="margin-top:20px"><div class="card-head"><div><h3>Latest updates</h3><p class="sub">New paid orders, disputes and payouts. This page refreshes itself.</p></div><span class="chip green">● Live</span></div><div id="updates" class="stack-sm">${updatesList(updateData.updates)}</div></div>
     <div id="orders" style="margin-top:20px"></div>`;
 
   const drawPrices = () => {
@@ -39,7 +40,7 @@ export async function renderSupplier(root, api, alive) {
     root.querySelector('#orders').innerHTML = orders.map((o) => {
       const step = next[o.status];
       const confirmed = o.shares.filter((s) => s.deliveryConfirmed).length, paying = o.shares.filter((s) => ['FUNDED', 'RELEASED'].includes(s.status)).length;
-      return `<div class="card order-card"><div class="card-head"><div><h3>${esc(o.product)} · ${o.fundedQuantity} kg</h3><p class="sub">${esc(o.id)} · ${paying} buyer${paying === 1 ? '' : 's'} · deliver by ${when(o.deliveryDeadline)}</p></div>${statusChip(o.status)}</div>
+      return `<div class="card order-card"><div class="card-head"><div><h3>${esc(o.product)} · ${o.fundedQuantity} units</h3><p class="sub">${esc(o.id)} · ${paying} buyer${paying === 1 ? '' : 's'} · deliver by ${when(o.deliveryDeadline)}</p></div>${statusChip(o.status)}</div>
         <div class="row"><span class="k">${o.status === 'COMPLETED' ? 'Paid to you' : 'Held in escrow for you'}</span><b class="mono">${money(o.status === 'COMPLETED' ? o.shares.filter((s) => s.status === 'RELEASED').reduce((a, s) => a + Number(s.total), 0) : o.heldInEscrow)}</b></div>
         <div class="row" style="margin-top:8px"><span class="k">Buyer confirmations</span><span>${confirmed}/${paying}</span></div>
         ${o.disputeReason ? `<div class="sim-note">Dispute opened: ${esc(o.disputeReason)}. A reviewer will contact you for delivery proof.</div>` : ''}
@@ -48,6 +49,18 @@ export async function renderSupplier(root, api, alive) {
     }).join('') || '<div class="card empty"><div class="big">📦</div>No funded orders yet.</div>';
   };
   draw();
+
+  let lastOrders = JSON.stringify(orders), lastUpdates = JSON.stringify(updateData.updates);
+  const timer = setInterval(async () => {
+    if (!alive()) return clearInterval(timer);
+    if (root.querySelector('#orders button:disabled')) return;
+    try {
+      const [o, u] = await Promise.all([api.groupOrders(), api.updates()]);
+      if (!alive()) return clearInterval(timer);
+      if (JSON.stringify(o.orders) !== lastOrders) { orders = o.orders; lastOrders = JSON.stringify(orders); draw(); }
+      if (JSON.stringify(u.updates) !== lastUpdates) { lastUpdates = JSON.stringify(u.updates); root.querySelector('#updates').innerHTML = updatesList(u.updates); }
+    } catch { /* try again next tick */ }
+  }, 8000);
 
   root.querySelector('#orders').onclick = async (e) => {
     const b = e.target.closest('[data-a]');

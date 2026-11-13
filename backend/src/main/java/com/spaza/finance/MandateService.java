@@ -177,6 +177,19 @@ public class MandateService implements MandateReader {
     audit.record(ActorType.SYSTEM, "seed", "MANDATE_SEEDED", Map.of("ownerId", ownerId), view(m));
   }
 
+  /** DEMO seed: adds suppliers to an existing mandate's allow-list (never removes any). Recorded in the audit log. */
+  public synchronized void ensureAllowed(String ownerId, List<String> supplierIds) {
+    SpendingMandate m = mandate(ownerId).orElse(null);
+    if (m == null) return;
+    List<String> allowed = new ArrayList<>(m.getAllowedSuppliers());
+    List<String> added = supplierIds.stream().filter(id -> !allowed.contains(id)).toList();
+    if (added.isEmpty()) return;
+    allowed.addAll(added);
+    m.apply(m.getPerOrderCap(), m.getDailyCap(), allowed, m.getValidUntil(), m.isEnforceOrderDeadline(), "system-seed", clock.instant());
+    saveMandate(m);
+    audit.record(ActorType.SYSTEM, "seed", "MANDATE_SUPPLIERS_SEEDED", Map.of("ownerId", ownerId, "added", added), Map.of());
+  }
+
   @Override public synchronized Optional<Map<String,Object>> snapshot(String ownerId) {
     return mandate(ownerId).map(this::view);
   }

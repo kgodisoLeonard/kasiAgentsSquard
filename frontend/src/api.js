@@ -154,6 +154,7 @@ export const api = {
   directory: () => request('/platform/directory'),
   recommendedSuppliers: () => request('/platform/suppliers/recommended'),
   myPrices: () => request('/supplier/prices'),
+  updates: () => request('/platform/updates'),
   setMyPrice: (product, unitPrice) => put('/supplier/prices', { product, unitPrice }),
   rateSupplier: (supplierId, body) => post(`/platform/suppliers/${encodeURIComponent(supplierId)}/ratings`, body),
   notifications: () => request('/platform/notifications'),

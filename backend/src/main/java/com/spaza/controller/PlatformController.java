@@ -32,15 +32,27 @@ import java.util.*;
 public class PlatformController {
   private final InventoryService store;
   private final SupplierCatalog catalog;
+  @org.springframework.beans.factory.annotation.Autowired private com.spaza.notify.ShopUpdates updates;
   private final AppUserRepository users;
   private final SupplierRatingRepository ratings;
   private final OwnerSupplierRepository ownerSuppliers;
   private final SupplierRegistry registry;
   private final GroupOrderService orders;
-  /** Product offers published by suppliers. Supplier identity and verification come from SupplierRegistry. */
-  private final List<Map<String,Object>> offers = List.of(
-    offer("SUP-001", "Minced Meat", 65.0, 50, 1),
-    offer("SUP-002", "Maize Meal", 82.0, 30, 2));
+  /** Supplier minimum order (units) and delivery days. DEMO values; suppliers set prices in their own price lists. */
+  private static int minOrder(String supplierId) { return switch (supplierId) { case "SUP-001", "SUP-002" -> 10; default -> 5; }; }
+  private static int deliveryDays(String supplierId) { return switch (supplierId) { case "SUP-001" -> 1; case "SUP-002" -> 2; default -> 2; }; }
+
+  /** Offers = every line of every verified, unscreened supplier's price list (from the database). */
+  private List<Map<String,Object>> offers() {
+    List<Map<String,Object>> list = new ArrayList<>();
+    for (SupplierCatalog.Item i : catalog.all()) registry.find(i.supplierId()).filter(SupplierRegistry.SupplierInfo::canReceiveOrders).ifPresent(s -> {
+      Map<String,Object> o = offer(s.id(), i.product(), i.unitPrice().doubleValue(), minOrder(s.id()), deliveryDays(s.id()));
+      o.put("name", s.name());
+      list.add(o);
+    });
+    list.sort(Comparator.comparing((Map<String,Object> o) -> String.valueOf(o.get("product"))).thenComparing(o -> (Double) o.get("price")));
+    return list;
+  }
 
   public PlatformController(InventoryService store, SupplierCatalog catalog, AppUserRepository users, SupplierRatingRepository ratings, OwnerSupplierRepository ownerSuppliers,
                             SupplierRegistry registry, GroupOrderService orders) {
@@ -61,7 +73,7 @@ public class PlatformController {
   /** Offers from verified, unscreened suppliers only, with the supplier's trust data attached. */
   @GetMapping("/suppliers") public Map<String,Object> suppliers() {
     List<Map<String,Object>> list = new ArrayList<>();
-    for (Map<String,Object> o : offers) registry.find(String.valueOf(o.get("id"))).ifPresent(s -> {
+    for (Map<String,Object> o : offers()) registry.find(String.valueOf(o.get("id"))).ifPresent(s -> {
       Map<String,Object> v = new LinkedHashMap<>(o);
       v.put("name", s.name()); v.put("verified", s.canReceiveOrders()); v.put("country", "South Africa");
       v.put("completedDeliveries", s.completedDeliveries()); v.put("onTrial", s.onTrial()); v.put("rating", averageRating(s.id(), 0));
@@ -70,11 +82,10 @@ public class PlatformController {
     return Map.of("success", true, "suppliers", list);
   }
 
+  /** Cheapest verified offer for a product (offers are sorted by price). */
   public Optional<Map<String,Object>> offerFor(String productName) {
     String wanted = productName.toLowerCase(Locale.ROOT);
-    return offers.stream().filter(o -> wanted.startsWith(String.valueOf(o.get("product")).toLowerCase(Locale.ROOT)))
-        .filter(o -> registry.find(String.valueOf(o.get("id"))).map(SupplierRegistry.SupplierInfo::canReceiveOrders).orElse(false))
-        .findFirst().map(o -> { Map<String,Object> v = new LinkedHashMap<>(o); v.put("name", registry.find(String.valueOf(o.get("id"))).get().name()); return v; });
+    return offers().stream().filter(o -> String.valueOf(o.get("product")).toLowerCase(Locale.ROOT).equals(wanted)).findFirst();
   }
 
   @GetMapping("/directory") public Map<String,Object> directory() {
@@ -160,6 +171,11 @@ public class PlatformController {
     String supplierName = registry.find(supplierId).map(SupplierRegistry.SupplierInfo::name).orElse(supplierId);
     SupplierRating saved = ratings.save(new SupplierRating(UUID.randomUUID().toString(), supplierId, supplierName, u.id(), u.name(), orderId + ":" + u.id(), rating, comment));
     return Map.of("success", true, "rating", ratingView(saved), "message", "Supplier rating saved");
+  }
+
+  /** Group-order updates for the signed-in shop or supplier, newest first (the shared feed every member sees). */
+  @GetMapping("/updates") public Map<String,Object> updates(HttpServletRequest req) {
+    return Map.of("success", true, "updates", updates.forUser(AuthInterceptor.current(req).id(), 50));
   }
 
   @GetMapping("/notifications") public Map<String,Object> notifications(HttpServletRequest req) {
