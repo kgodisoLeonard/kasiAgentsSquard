@@ -20,8 +20,8 @@ public class UserSeeder {
     new Demo("owner-demo-2", "Sipho Ndlovu", "sipho@spaza.local", "spaza123", "OWNER", "Sipho's Corner Shop"),
     new Demo("supplier-demo", "Mokoena Meats", "supplier@mokoena.local", "supplier123", "SUPPLIER", "Mokoena Meats (Pty) Ltd"),
     new Demo("supplier-ubuntu", "Ubuntu Foods Co-op", "ubuntu@coop.local", "supplier123", "SUPPLIER", "Ubuntu Foods Co-op"),
-    new Demo("admin-1", "Reviewer Nomsa", "reviewer1@spaza.local", "review123", "ADMIN", "Spaza Trust & Safety"),
-    new Demo("admin-2", "Reviewer Pieter", "reviewer2@spaza.local", "review123", "ADMIN", "Spaza Trust & Safety"));
+    new Demo("admin-1", "Reviewer Nomsa", "reviewer1@spaza.local", "review123", "ADMIN", "Spaza Trust & Safety 1"),
+    new Demo("admin-2", "Reviewer Pieter", "reviewer2@spaza.local", "review123", "ADMIN", "Spaza Trust & Safety 2"));
 
   @Bean CommandLineRunner seedUsers(AppUserRepository users, MandateService mandates) {
     return args -> {

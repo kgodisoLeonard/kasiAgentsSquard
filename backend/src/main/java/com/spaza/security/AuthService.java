@@ -54,25 +54,28 @@ public class AuthService {
 
   // ------------------------------------------------------------- login + MFA
 
-  public synchronized Map<String,Object> startLogin(String email, String password, String ip) {
+  /** Sign in with business name + password. The business name is matched case-insensitively. */
+  public synchronized Map<String,Object> startLogin(String businessName, String password, String ip) {
     Instant now = clock.instant();
-    Instant until = lockedUntil.get(email);
+    String key = businessName.trim().toLowerCase(Locale.ROOT);
+    Instant until = lockedUntil.get(key);
     if (until != null && now.isBefore(until)) {
       long mins = Math.max(1, Duration.between(now, until).toMinutes() + 1);
       throw new AuthException(429, "Too many failed sign-in attempts. Try again in " + mins + " minute" + (mins == 1 ? "" : "s") + ".");
     }
-    Optional<AppUser> user = users.findByEmail(email).filter(u -> encoder.matches(password, u.getPasswordHash()));
+    Optional<AppUser> user = users.findByBusinessNameIgnoreCase(businessName.trim()).stream()
+        .filter(u -> encoder.matches(password, u.getPasswordHash())).findFirst();
     if (user.isEmpty()) {
-      int count = ++failures.computeIfAbsent(email, k -> new int[1])[0];
-      audit.record(ActorType.HUMAN, email, "LOGIN_FAILED", Map.of("ip", ip, "failures", count), Map.of());
+      int count = ++failures.computeIfAbsent(key, k -> new int[1])[0];
+      audit.record(ActorType.HUMAN, key, "LOGIN_FAILED", Map.of("ip", ip, "failures", count), Map.of());
       if (count >= MAX_FAILURES) {
-        lockedUntil.put(email, now.plus(LOCKOUT)); failures.remove(email);
-        audit.record(ActorType.SYSTEM, "auth", "ACCOUNT_LOCKED", Map.of("email", email), Map.of("minutes", LOCKOUT.toMinutes()));
+        lockedUntil.put(key, now.plus(LOCKOUT)); failures.remove(key);
+        audit.record(ActorType.SYSTEM, "auth", "ACCOUNT_LOCKED", Map.of("businessName", key), Map.of("minutes", LOCKOUT.toMinutes()));
         throw new AuthException(429, "Too many failed sign-in attempts. The account is locked for " + LOCKOUT.toMinutes() + " minutes.");
       }
-      throw new AuthException(401, "Invalid email or password");
+      throw new AuthException(401, "Invalid business name or password");
     }
-    failures.remove(email);
+    failures.remove(key);
     return issueChallenge(user.get().getId(), "LOGIN");
   }
 

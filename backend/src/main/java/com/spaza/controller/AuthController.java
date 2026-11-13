@@ -32,10 +32,10 @@ public class AuthController {
 
   /** Step 1: password check. Returns a one-time-code challenge (MFA is mandatory). */
   @PostMapping("/login") public ResponseEntity<?> login(@RequestBody(required = false) Map<String,Object> body, HttpServletRequest req) {
-    String email = text(body, "email").toLowerCase(Locale.ROOT), password = text(body, "password");
-    if (email.isEmpty() || password.isEmpty()) return error(400, "Email and password are required");
-    if (password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) return error(401, "Invalid email or password");
-    return ResponseEntity.ok(auth.startLogin(email, password, req.getRemoteAddr()));
+    String business = text(body, "businessName"), password = text(body, "password");
+    if (business.isEmpty() || password.isEmpty()) return error(400, "Business name and password are required");
+    if (business.length() > MAX_NAME || password.getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) return error(401, "Invalid business name or password");
+    return ResponseEntity.ok(auth.startLogin(business, password, req.getRemoteAddr()));
   }
 
   /** Step 2: one-time code. Returns a short-lived access token and a rotating refresh token. */
@@ -49,7 +49,7 @@ public class AuthController {
 
   @PostMapping("/register") public ResponseEntity<?> register(@RequestBody(required = false) Map<String,Object> body) {
     String name = text(body, "name"), email = text(body, "email").toLowerCase(Locale.ROOT), password = text(body, "password"), business = text(body, "businessName"), role = text(body, "role").toUpperCase(Locale.ROOT);
-    if (name.isEmpty()) return error(400, "Your name is required");
+    if (name.isEmpty()) return error(400, "Your name and surname are required");
     if (business.isEmpty()) return error(400, "Business name is required");
     if (name.length() > MAX_NAME || business.length() > MAX_NAME) return error(400, "Name and business name must be " + MAX_NAME + " characters or fewer");
     if (email.length() > MAX_EMAIL || !EMAIL.matcher(email).matches()) return error(400, "Enter a valid email address");
@@ -57,6 +57,7 @@ public class AuthController {
     if (weak != null) return error(400, weak);
     if (!(role.equals("OWNER") || role.equals("SUPPLIER"))) return error(400, "Choose an account type: spaza owner or supplier");
     if (users.existsByEmail(email)) return error(409, "An account with this email already exists");
+    if (users.existsByBusinessNameIgnoreCase(business)) return error(409, "That business name is already registered. Sign in, or use a different name.");
     try {
       // New accounts start at Level 1 (unverified). Orders and payouts need Level 2 verification.
       AppUser user = users.saveAndFlush(new AppUser(UUID.randomUUID().toString(), name, email, encoder.encode(password), role, business, false));
