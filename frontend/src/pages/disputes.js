@@ -1,67 +1,63 @@
-import { esc, money, toast } from '../ui.js';
+import { esc, money, toast, statusChip } from '../ui.js';
+import { session as auth } from '../api.js';
 
 export async function renderDisputes(root, api, alive) {
+  const me = auth.user();
+  const [disputeData, orderData] = await Promise.all([api.disputes(), api.groupOrders()]);
+  if (!alive()) return;
+  const isReviewer = me.role === 'ADMIN';
+  const disputes = disputeData.disputes;
+  const all = orderData.orders;
+  const preselected = sessionStorage.getItem('spaza_evidence') || disputes[0]?.id || all[0]?.id || '';
+  sessionStorage.removeItem('spaza_evidence');
+
   root.innerHTML = `
-    <div class="card" style="margin-bottom:20px">
-      <h3>Look up a case</h3><p class="sub">Generate a verifiable evidence pack for any case reference</p>
-      <form id="lookup" style="display:flex;gap:10px;flex-wrap:wrap">
-        <input id="ref" class="input mono" style="flex:1;min-width:220px" value="EP-2026-000127" required pattern="[A-Za-z0-9\\-]{3,40}"/>
-        <button class="btn btn-primary" type="submit">Generate pack</button>
-      </form>
-    </div>
-    <div id="pack"></div>`;
+    <div class="hero"><span class="chip violet">Human decisions only</span><h3>${isReviewer ? 'Cases waiting for an independent reviewer' : 'Your disputes and evidence'}</h3>
+      <p>Evidence packs are built from platform records (the order, its escrow transactions and the audit log) and fingerprinted with SHA-256.
+      The agent's summary cites those records and recommends; a human reviewer who is not a party decides, with written reasons. Appeals and graduated sanctions are simulated in this demo.</p></div>
+    <div class="grid g-3" style="margin-top:20px">
+      <div class="card"><h3>Cases</h3><p class="sub">Disputed or refunded orders</p><div class="stack-sm" id="cases"></div>
+        <div class="divider"></div>
+        <form id="lookup" class="stack"><div class="field"><label for="ref">Evidence pack for order</label>
+          <select id="ref" class="input">${all.map((o) => `<option value="${esc(o.id)}" ${o.id === preselected ? 'selected' : ''}>${esc(o.id)} · ${esc(o.product)} · ${esc(o.status)}</option>`).join('')}</select></div>
+          <button class="btn btn-primary" type="submit" ${all.length ? '' : 'disabled'}>Generate pack</button></form></div>
+      <div class="span-2" id="pack"><div class="card empty">Choose an order to build its evidence pack.</div></div>
+    </div>`;
 
   const $ = (s) => root.querySelector(s);
+  $('#cases').innerHTML = disputes.map((d) => `<div class="row"><span><b>${esc(d.id)}</b><br><small>${esc(d.product)} · ${esc(d.supplierName)}</small></span>${statusChip(d.status)}</div>`).join('') || '<div class="empty">No open cases.</div>';
 
   async function load(ref) {
+    if (!ref) return;
     $('#pack').innerHTML = '<div class="loader"><div class="spinner"></div><div>Hashing evidence…</div></div>';
     try {
       const res = await api.evidencePack(ref);
       if (!alive()) return;
-      const c = res.content;
+      const c = res.content, s = c.agentSummary;
       $('#pack').innerHTML = `
-        <div class="grid g-3">
-          <div class="card span-2">
-            <div class="card-head">
-              <div><h3>${esc(res.documentTitle)}</h3><p class="sub">${esc(c.type)}</p></div>
-              <span class="chip green">✓ ${esc(res.status)}</span>
-            </div>
-            <div class="grid g-2" style="gap:14px">
-              ${party('Claimant', c.claimant, '🏢')}
-              ${party('Respondent', c.respondent, '🏪')}
-            </div>
-            <h3 style="margin:22px 0 10px;font-size:14px;color:var(--muted)">Evidence on file</h3>
-            <table class="table"><tbody>
-              ${Object.entries(c.evidence).map(([k, v]) => `<tr><td style="color:var(--muted)">${esc(label(k))}</td><td class="mono" style="text-align:right">${esc(v)}</td></tr>`).join('')}
-            </tbody></table>
-          </div>
-          <div class="card">
-            <h3>Integrity</h3><p class="sub">Any change to the evidence changes this fingerprint</p>
-            <div class="field"><label>SHA-256 fingerprint</label><div class="hash">${esc(res.sha256Fingerprint)}</div></div>
-            <div class="divider"></div>
-            <div class="stack-sm" style="font-size:13px">
-              <div class="row"><span class="k">Verify code</span><span class="mono">${esc(res.verificationCode)}</span></div>
-              <div class="row"><span class="k">Amount</span><span class="mono" style="color:var(--primary)">${money(c.amount)}</span></div>
-            </div>
-            <button class="btn btn-ghost btn-block" id="copy" style="margin-top:18px">Copy fingerprint</button>
-          </div>
-        </div>`;
-      $('#copy').addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText(res.sha256Fingerprint); toast('Fingerprint copied'); }
-        catch { toast('Clipboard not available', 'error'); }
+        <div class="card"><div class="card-head"><div><h3>${esc(res.documentTitle)}</h3><p class="sub">${esc(c.supplier)} · ${money(c.total)}${c.disputeReason ? ` · ${esc(c.disputeReason)}` : ''}</p></div>${statusChip(res.status)}</div>
+          <div class="field"><label>SHA-256 fingerprint</label><div class="hash">${esc(res.sha256Fingerprint)}</div></div>
+          <div class="row" style="margin-top:8px;font-size:13px"><span class="k">Verify code</span><span class="mono">${esc(res.verificationCode)}</span></div>
+          <div class="sim-note"><b>Agent summary (${esc(s.confidence)} confidence):</b> ${esc(s.finding)}<br><b>Recommendation:</b> ${esc(s.recommendation)}<br>
+            <small>Sources: audit entries ${s.sourceAuditSeq.map((x) => '#' + x).join(', ') || 'none'} · ${esc(s.note)}</small></div>
+          ${isReviewer && res.status === 'DISPUTED' ? `<form id="decide" class="stack" style="margin-top:14px"><div class="field"><label for="reasons">Written reasons (required)</label><textarea id="reasons" class="input" rows="3" required></textarea></div>
+            <div class="row" style="gap:8px;justify-content:flex-start"><button class="btn btn-primary btn-sm" data-outcome="RELEASE" type="submit">Release escrow to supplier</button><button class="btn btn-ghost btn-sm" data-outcome="REFUND" type="submit">Refund buyers</button></div></form>` : ''}
+          <h3 style="margin:18px 0 8px;font-size:14px">Records (${c.records.length})</h3>
+          <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Actor</th><th>Action</th><th>Hash</th></tr></thead><tbody>
+            ${c.records.map((r) => `<tr><td class="mono">${r.seq}</td><td>${esc(r.actorType)} · ${esc(r.actor)}</td><td>${esc(r.action)}</td><td class="mono" style="font-size:11px">${esc(r.hash.slice(0, 12))}…</td></tr>`).join('')}</tbody></table></div>
+          <button class="btn btn-ghost btn-block" id="copy" style="margin-top:14px">Copy fingerprint</button></div>`;
+      $('#copy').onclick = async () => { try { await navigator.clipboard.writeText(res.sha256Fingerprint); toast('Fingerprint copied'); } catch { toast('Clipboard not available', 'error'); } };
+      const form = $('#decide');
+      if (form) form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try { await api.resolveDispute(ref, e.submitter.dataset.outcome, $('#reasons').value.trim()); toast('Decision recorded'); renderDisputes(root, api, alive); }
+        catch (err) { toast(err.message, 'error'); }
       });
     } catch (err) {
       if (alive()) $('#pack').innerHTML = `<div class="card empty"><div class="big">⚠️</div>${esc(err.message)}</div>`;
     }
   }
 
-  $('#lookup').addEventListener('submit', (e) => { e.preventDefault(); load($('#ref').value.trim()); });
-  await load('EP-2026-000127');
+  $('#lookup').addEventListener('submit', (e) => { e.preventDefault(); load($('#ref').value); });
+  await load(preselected);
 }
-
-const label = (k) => k.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase());
-const party = (role, name, icon) => `
-  <div style="display:flex;gap:12px;align-items:center;padding:14px;border-radius:14px;background:hsla(222 47% 4% / .5);border:1px solid var(--border)">
-    <div style="font-size:26px">${icon}</div>
-    <div><div style="font-size:12px;color:var(--muted)">${role}</div><div style="font-weight:600">${esc(name)}</div></div>
-  </div>`;

@@ -43,6 +43,21 @@ public class ApiExceptionHandler {
     return body(HttpStatus.NOT_FOUND, e.getMessage());
   }
 
+  @ExceptionHandler(com.spaza.security.AuthService.AuthException.class)
+  ResponseEntity<Map<String,Object>> auth(com.spaza.security.AuthService.AuthException e) {
+    return body(HttpStatus.valueOf(e.status()), e.getMessage());
+  }
+
+  @ExceptionHandler(com.spaza.security.AuthService.StepUpRequired.class)
+  ResponseEntity<Map<String,Object>> stepUp(com.spaza.security.AuthService.StepUpRequired e) {
+    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage(), "code", "STEP_UP_REQUIRED", "action", e.action()));
+  }
+
+  @ExceptionHandler(SecurityException.class)
+  ResponseEntity<Map<String,Object>> forbidden(SecurityException e) {
+    return body(HttpStatus.FORBIDDEN, e.getMessage());
+  }
+
   @ExceptionHandler(IllegalStateException.class)
   ResponseEntity<Map<String,Object>> conflict(IllegalStateException e) {
     return body(HttpStatus.CONFLICT, e.getMessage());

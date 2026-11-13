@@ -490,3 +490,19 @@ body.no-scroll { overflow: hidden; }
 
 /* KasiLingo AI Studio */
 .kasi-metric{font-size:36px;font-weight:800;margin:12px 0}.kasi-metric small{font-size:14px;font-weight:500}.kasi-list{display:grid;gap:10px;margin:14px 0;max-height:230px;overflow:auto}.kasi-list .row,.kasi-offer{padding:10px;border:1px solid var(--border);border-radius:10px}.kasi-chat{height:245px;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:14px;margin:12px 0}.kasi-bubble{padding:12px 14px;border-radius:14px;max-width:88%;line-height:1.5;overflow-wrap:anywhere}.kasi-bubble.bot{background:var(--card);border:1px solid var(--border);align-self:flex-start}.kasi-bubble.user{background:var(--primary);color:white;align-self:flex-end}.kasi-form{display:flex;gap:8px}.kasi-form input{min-width:0;flex:1}.kasi-result{margin-top:12px;padding:14px;border:1px solid var(--border);border-radius:12px;line-height:1.6}.card label{display:block;margin-top:12px}.card label .input{display:block;width:100%;margin-top:6px}@media(max-width:600px){.kasi-form{flex-direction:column}}
+
+/* Step-up / OTP dialog and simulation notices */
+.modal-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 16px; background: hsla(222 47% 4% / .55); }
+.modal { width: min(440px, 100%); }
+.sim-sms, .sim-note { margin-top: 12px; padding: 10px 12px; border-radius: 10px; border: 1px dashed #d98b13; background: hsla(38 92% 50% / .08); font-size: 13px; }
+.sim-sms .mono { font-size: 18px; font-weight: 700; letter-spacing: .15em; }
+.split-table td, .split-table th { font-size: 13px; }
+.order-card + .order-card { margin-top: 16px; }
+.order-actions-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.timeline { margin-top: 10px; font-size: 12px; color: var(--muted); max-height: 180px; overflow: auto; }
+.timeline div { padding: 3px 0; border-bottom: 1px dashed var(--border); }
+.audit-json { font-size: 11px; max-width: 360px; word-break: break-all; color: var(--muted); }
+.table-wrap { overflow-x: auto; }
+.check-list { display: grid; gap: 8px; }
+.check-list label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+pre.result { white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 320px; overflow: auto; padding: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); }

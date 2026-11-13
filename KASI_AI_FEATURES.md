@@ -15,7 +15,7 @@
 - Stock recommendations use threshold arithmetic, not historical demand forecasting.
 - POS sales history is in-memory and cumulative; it cannot reliably represent today's sales or expenses.
 - Supplier comparison uses exact product-name matching; supplier quantity units must be verified before purchasing.
-- Wallet balances shown are XRPL Testnet balances, not actual spendable cash.
+- Wallet balances come from a simulated ledger (no XRPL Testnet connection), not actual spendable cash.
 
 ## Running
 From `frontend`, run `npm install` then `npm run dev`; start the existing Java backend separately as described in README. Sign in as shop owner and open **Kasi AI Studio**. The Studio requires backend API access for inventory data.

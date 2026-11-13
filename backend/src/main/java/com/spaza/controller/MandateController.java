@@ -1,37 +1,56 @@
 package com.spaza.controller;
 
+import com.spaza.finance.MandateService;
+import com.spaza.finance.MandateService.HumanActor;
+import com.spaza.finance.SupplierRegistry;
+import com.spaza.security.AuthInterceptor;
+import com.spaza.security.AuthService;
+import com.spaza.security.AuthService.AuthUser;
+import com.spaza.security.RequireRole;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.*;
 
+/** Human-only mandate administration. This namespace is separate from the agent API and the agent holds no session. */
 @RestController
 @RequestMapping("/api/mandates")
+@RequireRole("OWNER")
 public class MandateController {
+  public static final String STEP_UP_ACTION = "change spending mandate";
+  private final MandateService mandates;
+  private final SupplierRegistry suppliers;
+  private final AuthService auth;
 
-    private final List<Map<String, Object>> mandates = new ArrayList<>();
+  public MandateController(MandateService mandates, SupplierRegistry suppliers, AuthService auth) { this.mandates = mandates; this.suppliers = suppliers; this.auth = auth; }
 
-    public MandateController() {
-        mandates.add(Map.of(
-            "id", "MANDATE-01",
-            "title", "Daily Supplier Restock Mandate",
-            "perTxCap", 1000.0, "dailyCap", 5000.0, "spentToday", 1250.0,
-            "expires", "2026-12-31", "status", "ACTIVE"));
-        mandates.add(Map.of(
-            "id", "MANDATE-02",
-            "title", "Emergency Shortage Group Buy Cap",
-            "perTxCap", 500.0, "dailyCap", 2500.0, "spentToday", 950.0,
-            "expires", "2026-11-15", "status", "ACTIVE"));
-    }
+  @GetMapping
+  public Map<String,Object> mine(HttpServletRequest req) {
+    AuthUser user = AuthInterceptor.current(req);
+    Map<String,Object> r = new LinkedHashMap<>();
+    r.put("success", true);
+    r.put("mandate", mandates.snapshot(user.id()).orElse(null));
+    r.put("suppliers", suppliers.all().stream().map(s -> Map.of("id", s.id(), "name", s.name(), "verified", s.verified(), "onTrial", s.onTrial(), "screeningHit", s.sanctionsHit())).toList());
+    r.put("stepUpAction", STEP_UP_ACTION);
+    return r;
+  }
 
-    @GetMapping
-    public Map<String, Object> list() { return Map.of("success", true, "mandates", mandates); }
+  @PutMapping
+  public Map<String,Object> update(@RequestBody Map<String,Object> body, HttpServletRequest req, @RequestHeader(value = "X-Step-Up", required = false) String stepUp) {
+    AuthUser user = AuthInterceptor.current(req);
+    auth.requireStepUp(user, STEP_UP_ACTION, stepUp);
+    List<String> allowed = new ArrayList<>();
+    if (body.get("allowedSuppliers") instanceof List<?> list) list.forEach(x -> allowed.add(String.valueOf(x)));
+    LocalDate validUntil;
+    try { validUntil = LocalDate.parse(String.valueOf(body.get("validUntil"))); } catch (Exception e) { throw new IllegalArgumentException("Valid-until must be a date (YYYY-MM-DD)"); }
+    var saved = mandates.update(new HumanActor(user.id(), user.role()), user.id(), amount(body.get("perOrderCap")), amount(body.get("dailyCap")),
+        allowed, validUntil, !Boolean.FALSE.equals(body.get("enforceOrderDeadline")));
+    return Map.of("success", true, "mandate", mandates.view(saved), "message", "Mandate saved. The agent sees the new limits immediately but cannot change them.");
+  }
 
-    @PostMapping
-    public Map<String, Object> create(@RequestBody Map<String, Object> body) {
-        Map<String, Object> m = new HashMap<>(body);
-        m.put("id", "MANDATE-0" + (mandates.size() + 1));
-        m.put("status", "ACTIVE");
-        m.put("spentToday", 0.0);
-        mandates.add(m);
-        return Map.of("success", true, "mandate", m);
-    }
+  private static BigDecimal amount(Object v) {
+    try { return new BigDecimal(String.valueOf(v).trim()); } catch (Exception e) { throw new IllegalArgumentException("Caps must be numbers"); }
+  }
 }

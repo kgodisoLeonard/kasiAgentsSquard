@@ -4,6 +4,7 @@ import com.spaza.model.Product;
 import com.spaza.model.SaleItem;
 import com.spaza.model.SaleRequest;
 import com.spaza.repository.InMemoryStore;
+import com.spaza.security.RequireRole;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +13,7 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/pos")
+@RequireRole("OWNER")
 public class PosController {
 
     private final InMemoryStore store;

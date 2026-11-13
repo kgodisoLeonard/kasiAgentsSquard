@@ -1,5 +1,6 @@
 package com.spaza.config;
 
+import com.spaza.finance.MandateService;
 import com.spaza.model.AppUser;
 import com.spaza.repository.AppUserRepository;
 import org.springframework.boot.CommandLineRunner;
@@ -7,12 +8,25 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
+import java.util.List;
+
+/** DEMO accounts with published passwords. Never enable this seeder in production. */
 @Configuration
 public class UserSeeder {
-  @Bean CommandLineRunner seedUsers(AppUserRepository users) {
-    return args -> { BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
-      if (!users.existsByEmail("owner@spaza.local")) users.save(new AppUser("owner-demo", "Thandi Mokone", "owner@spaza.local", encoder.encode("spaza123"), "OWNER", "Thandi's Spaza", true));
-      if (!users.existsByEmail("supplier@mokoena.local")) users.save(new AppUser("supplier-demo", "Mokoena Meats", "supplier@mokoena.local", encoder.encode("supplier123"), "SUPPLIER", "Mokoena Meats (Pty) Ltd", true));
+  private record Demo(String id, String name, String email, String password, String role, String business) {}
+  private static final List<Demo> DEMO = List.of(
+    new Demo("owner-demo", "Thandi Mokone", "owner@spaza.local", "spaza123", "OWNER", "Thandi's Spaza"),
+    new Demo("owner-demo-2", "Sipho Ndlovu", "sipho@spaza.local", "spaza123", "OWNER", "Sipho's Corner Shop"),
+    new Demo("supplier-demo", "Mokoena Meats", "supplier@mokoena.local", "supplier123", "SUPPLIER", "Mokoena Meats (Pty) Ltd"),
+    new Demo("supplier-ubuntu", "Ubuntu Foods Co-op", "ubuntu@coop.local", "supplier123", "SUPPLIER", "Ubuntu Foods Co-op"),
+    new Demo("admin-1", "Reviewer Nomsa", "reviewer1@spaza.local", "review123", "ADMIN", "Spaza Trust & Safety"),
+    new Demo("admin-2", "Reviewer Pieter", "reviewer2@spaza.local", "review123", "ADMIN", "Spaza Trust & Safety"));
+
+  @Bean CommandLineRunner seedUsers(AppUserRepository users, MandateService mandates) {
+    return args -> {
+      BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+      for (Demo d : DEMO) if (!users.existsByEmail(d.email())) users.save(new AppUser(d.id(), d.name(), d.email(), encoder.encode(d.password()), d.role(), d.business(), true));
+      for (String owner : List.of("owner-demo", "owner-demo-2")) mandates.ensureDefault(owner, List.of("SUP-001", "SUP-002"));
     };
   }
 }

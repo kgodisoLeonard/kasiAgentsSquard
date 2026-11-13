@@ -1,63 +1,97 @@
 package com.spaza.controller;
+
+import com.spaza.agent.AgentGateway;
+import com.spaza.finance.GroupOrderService;
 import com.spaza.model.Product;
-import com.spaza.repository.InMemoryStore;
 import com.spaza.repository.AgentPolicy;
+import com.spaza.repository.AppUserRepository;
+import com.spaza.repository.InMemoryStore;
+import com.spaza.security.AuthInterceptor;
+import com.spaza.security.AuthService.AuthUser;
+import com.spaza.security.RequireRole;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.*;
 
+/**
+ * Owner-facing view of the Spaza Finance Agent. Every agent action goes through AgentGateway (allow-list,
+ * mandate read-only, audit-logged). The owner's session identifies who the agent works for; the agent itself
+ * holds no credentials.
+ */
 @RestController
 @RequestMapping("/api/agent")
+@RequireRole("OWNER")
 public class AgentController {
-    private final InMemoryStore store; private final AgentPolicy policy; private final PlatformController platform;
-    public AgentController(InMemoryStore store, AgentPolicy policy, PlatformController platform){this.store=store;this.policy=policy;this.platform=platform;}
+  private final InMemoryStore store; private final AgentPolicy policy; private final PlatformController platform;
+  private final AgentGateway agent; private final GroupOrderService orders; private final AppUserRepository users;
 
-    /** The agent's only configuration input: a read-only guardrail snapshot. Mandates are never exposed here. */
-    @GetMapping("/rules")
-    public Map<String,Object> rules() {
-        return Map.of("success", true, "rules", policy.get(),
-                "access", "READ_ONLY", "restrictedResources", List.of("mandates", "wallets", "bank_details", "identity_documents"));
-    }
+  public AgentController(InMemoryStore store, AgentPolicy policy, PlatformController platform, AgentGateway agent, GroupOrderService orders, AppUserRepository users) {
+    this.store = store; this.policy = policy; this.platform = platform; this.agent = agent; this.orders = orders; this.users = users;
+  }
 
-    /** Enforces the human-owned allow-list before any XRPL payment draft is created. */
-    @PostMapping("/purchase-draft")
-    public org.springframework.http.ResponseEntity<?> purchaseDraft(@RequestBody Map<String,Object> body) {
-        String item=String.valueOf(body.getOrDefault("item", ""));
-        double price=((Number)body.getOrDefault("unitPrice",0)).doubleValue();
-        int quantity=((Number)body.getOrDefault("quantity",0)).intValue();
-        boolean verified=Boolean.TRUE.equals(body.get("verifiedSupplier"));
-        if(quantity<1 || price<=0)return org.springframework.http.ResponseEntity.badRequest().body(Map.of("error","Item price and quantity are required"));
-        Map<String,Object> result=policy.approvePurchase(item,price,quantity,verified);
-        return Boolean.TRUE.equals(result.get("allowed")) ? org.springframework.http.ResponseEntity.ok(result) : org.springframework.http.ResponseEntity.unprocessableEntity().body(result);
-    }
+  @GetMapping("/rules")
+  public Map<String,Object> rules() {
+    return Map.of("success", true, "rules", policy.get(), "access", "READ_ONLY",
+        "allowedActions", Arrays.stream(AgentGateway.Action.values()).map(Enum::name).toList(),
+        "restrictedResources", List.of("mandate changes", "wallets", "bank_details", "identity_documents", "secrets"),
+        "systemPrompt", AgentGateway.SYSTEM_PROMPT);
+  }
 
-    @GetMapping("/shortages")
-    public Map<String, Object> shortages() {
-        List<Map<String,Object>> groups=new ArrayList<>(); List<Map<String,Object>> signals=new ArrayList<>();
-        for(Product p:store.findAll()) if(p.getQty() < policy.warningThreshold()) {
-            int required=Math.max(10,p.getLowStock()*3-p.getQty()); double delivery=250.0; double wholesale=Math.round(p.getCost()*1.08*100.0)/100.0;
-            boolean auto=policy.autoOrderEnabled() && p.getQty() < policy.autoOrderThreshold();
-            if (auto) platform.createAgentDraft(p.getName(), required, wholesale);
-            signals.add(Map.of("product",p.getName(),"stock",p.getQty(),"warning",policy.warningThreshold(),"autoOrder",auto));
-            groups.add(Map.ofEntries(Map.entry("id","GB-"+p.getId().substring(5).toUpperCase()),Map.entry("product",p.getName()),Map.entry("targetQty",required*5),Map.entry("currentQty",required*3),Map.entry("unitPrice",p.getPrice()),Map.entry("wholesalePrice",wholesale),Map.entry("deliveryFee",delivery),Map.entry("status",auto?"AUTO_ORDER_DRAFTED":"AWAITING_MEMBER_APPROVAL"),Map.entry("deadline","18h"),Map.entry("community","Mamelodi Central Buying Club"),Map.entry("memberCount",5),Map.entry("costSplit",Map.of("method","BY_QUANTITY","yourShare",required,"goods",required*wholesale,"delivery",delivery/5,"total",required*wholesale+delivery/5))));
-        }
-        return Map.of(
-            "success", true,
-            "shortagesDetected", signals.size(), "signals",signals,
-            "recommendation", "The agent groups verified spazas with the same shortage and splits goods and delivery costs by quantity.",
-            "groupOrders", groups, "humanRules", policy.get()
-        );
-    }
+  /** Runs one agent action on behalf of the signed-in owner. Blocked actions return allowed=false with a reason. */
+  @PostMapping("/actions")
+  public Map<String,Object> act(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+    AuthUser u = AuthInterceptor.current(req);
+    @SuppressWarnings("unchecked") Map<String,Object> params = body.get("params") instanceof Map<?,?> m ? (Map<String,Object>) m : Map.of();
+    return agent.execute(String.valueOf(body.get("action")), params, u.id());
+  }
 
-    @PostMapping("/group-buy/approve")
-    public Map<String, Object> approve(@RequestBody Map<String, Object> body) {
-        int qty = ((Number) body.getOrDefault("quantity", 10)).intValue();
-        boolean stepUp=qty*65.0 > 1000;
-        return Map.of(
-            "success", true,
-            "message", "Group order approved. Funds secured in escrow. 30-day debit mandate registered.",
-            "quantityApproved", qty,
-            "totalDueIn30Days", qty * 65.0 + 50.0, "stepUpRequired",stepUp,
-            "payment","XRPL Testnet simulation; owner confirmation required before any payment"
-        );
+  /** Shortage scan with group-order recommendations. If the owner's human rules allow it, the agent drafts orders (never pays). */
+  @GetMapping("/shortages")
+  public Map<String,Object> shortages(HttpServletRequest req) {
+    AuthUser u = AuthInterceptor.current(req);
+    Map<String,Object> scan = agent.execute("DETECT_SHORTAGES", Map.of(), u.id());
+    List<Map<String,Object>> recommendations = new ArrayList<>();
+    for (Product p : store.findAll()) {
+      if (p.getQty() > policy.warningThreshold()) continue;
+      Optional<Map<String,Object>> offer = platform.offerFor(p.getName());
+      Map<String,Object> rec = new LinkedHashMap<>();
+      rec.put("product", p.getName()); rec.put("stock", p.getQty()); rec.put("reorderLevel", p.getLowStock());
+      rec.put("source", "inventory record " + p.getId());
+      if (offer.isEmpty()) { rec.put("status", "NO_VERIFIED_OFFER"); rec.put("confidence", "LOW"); rec.put("note", "No verified supplier sells this item. Escalated to the owner."); recommendations.add(rec); continue; }
+      Map<String,Object> o = offer.get();
+      rec.put("supplierId", o.get("id")); rec.put("supplierName", o.get("name")); rec.put("offerProduct", o.get("product"));
+      rec.put("unitPrice", o.get("price")); rec.put("minOrder", o.get("minOrder")); rec.put("confidence", "HIGH");
+      rec.put("draftParams", draftParams(u, o));
+      boolean auto = policy.autoOrderEnabled() && p.getQty() < policy.autoOrderThreshold();
+      var existing = orders.openOrderFor(String.valueOf(o.get("id")), String.valueOf(o.get("product")));
+      if (existing.isPresent()) { rec.put("status", "ORDER_OPEN"); rec.put("orderId", existing.get().id()); }
+      else if (auto) {
+        Map<String,Object> drafted = agent.execute("DRAFT_GROUP_ORDER", draftParams(u, o), u.id());
+        rec.put("status", Boolean.TRUE.equals(drafted.get("allowed")) ? "AGENT_DRAFTED" : "DRAFT_BLOCKED");
+        rec.put("agentResult", drafted);
+      } else rec.put("status", "RECOMMENDED");
+      recommendations.add(rec);
     }
+    return Map.of("success", true, "scan", scan, "recommendations", recommendations, "humanRules", policy.get(),
+        "note", "The agent only drafts. Each member approves their own share; payment then passes the mandate check before escrow.");
+  }
+
+  @GetMapping("/notifications")
+  public Map<String,Object> notifications(HttpServletRequest req) {
+    return Map.of("success", true, "notifications", agent.notificationsFor(AuthInterceptor.current(req).id()));
+  }
+
+  /** The community is every verified owner (simulated "nearby shops"); quantities are split so the group meets the supplier minimum. */
+  private Map<String,Object> draftParams(AuthUser u, Map<String,Object> offer) {
+    List<Map<String,Object>> members = new ArrayList<>();
+    var owners = users.findAll().stream().filter(x -> "OWNER".equals(x.getRole()) && (x.isVerified() || x.getId().equals(u.id()))).toList();
+    int min = ((Number) offer.get("minOrder")).intValue();
+    int each = Math.max(1, (int) Math.ceil(min / (double) Math.max(1, owners.size())));
+    for (var o : owners) members.add(Map.of("ownerId", o.getId(), "ownerName", o.getName(), "quantity", each));
+    Map<String,Object> p = new LinkedHashMap<>();
+    p.put("supplierId", offer.get("id")); p.put("product", offer.get("product")); p.put("unitPrice", offer.get("price"));
+    p.put("minQuantity", min); p.put("deliveryFee", 250); p.put("approvalMinutes", 60 * 18); p.put("members", members);
+    return p;
+  }
 }

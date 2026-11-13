@@ -1,7 +1,7 @@
 import { renderStudio } from './kasi/studio.js';
 import { t,langOptions,setLang } from './kasi/languages.js';
 import './styles.css';
-import { api } from './api.js';
+import { api, session } from './api.js';
 import { icons, loader, errorBox, applyTheme, toggleTheme } from './ui.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderAgent } from './pages/agent.js';
@@ -13,29 +13,39 @@ import { renderRules } from './pages/rules.js';
 import { renderLogin } from './pages/login.js';
 import { renderSupplier } from './pages/supplier.js';
 import { renderMarketplace } from './pages/marketplace.js';
+import { renderOrders } from './pages/orders.js';
+import { renderAudit } from './pages/audit.js';
 
-let user = null;
 applyTheme();
-try { user = JSON.parse(localStorage.getItem('spaza_user') || 'null'); }
-catch { user = null; }
+localStorage.removeItem('spaza_user'); // legacy, pre-session storage
+let user = session.user();
 // Discard corrupted or outdated saved sessions instead of rendering a broken app.
-if (user && (typeof user !== 'object' || !user.id || !['OWNER', 'SUPPLIER'].includes(user.role))) user = null;
-if (!user) localStorage.removeItem('spaza_user');
+if (user && (typeof user !== 'object' || !user.id || !['OWNER', 'SUPPLIER', 'ADMIN'].includes(user.role))) { session.clear(); user = null; }
 const firstName = String(user?.name || '').trim().split(/\s+/)[0];
 const ownerRoutes = {
   studio: { label: '✨ Kasi AI Studio', title: 'Kasi AI Studio', sub: 'Multilingual business intelligence and owner-approved actions.', render: renderStudio },
   dashboard: { label: 'Dashboard', title: firstName ? `Good day, ${firstName} 👋` : 'Good day 👋', sub: "Here's how your spaza is doing today.", render: renderDashboard },
   marketplace: { label: 'Marketplace', title: 'Supplier Marketplace', sub: 'Choose verified products and place stock orders.', render: renderMarketplace },
-  agent: { label: 'Group Buys', title: 'AI Group Buying', sub: 'Your agent spots shortages and pools orders with nearby shops.', render: renderAgent },
-  wallet: { label: 'Wallet', title: 'RLUSD Wallet', sub: 'Send stablecoin payments on the XRPL Testnet.', render: renderWallet },
-  mandates: { label: 'Mandates', title: 'Spending Mandates', sub: 'Hard limits your AI agent can never exceed.', render: renderMandates },
-  disputes: { label: 'Disputes', title: 'Disputes & Evidence', sub: 'Tamper-evident, SHA-256 fingerprinted evidence packs.', render: renderDisputes },
-  platform: { label: 'Trust Centre', title: 'Trust Centre', sub: 'Verification, marketplace, credit and security controls.', render: renderPlatform },
-  rules: { label: 'Human Rules', title: 'Human Rules', sub: 'Owner controls for agent stock and ordering decisions.', render: renderRules },
+  orders: { label: 'Group Orders', title: 'Group Orders & Escrow', sub: 'Approve only your own share. Money waits in escrow until every buyer confirms delivery.', render: renderOrders },
+  agent: { label: 'Finance Agent', title: 'Spaza Finance Agent', sub: 'Shortage detection and order drafts. Allow-listed actions only; every action is logged.', render: renderAgent },
+  wallet: { label: 'Wallet', title: 'RLUSD Wallet (simulated)', sub: 'Pay verified suppliers within your mandate. Simulated ledger, not the live XRPL.', render: renderWallet },
+  mandates: { label: 'Mandates', title: 'Spending Mandate', sub: 'Hard limits checked before every payment. The agent can read them but never change them.', render: renderMandates },
+  disputes: { label: 'Disputes', title: 'Disputes & Evidence', sub: 'Evidence packs built from platform records, decided by human reviewers.', render: renderDisputes },
+  audit: { label: 'Audit Log', title: 'Audit Log', sub: 'Append-only, hash-chained record of every agent action, payment, approval and mandate change.', render: renderAudit },
+  platform: { label: 'Trust Centre', title: 'Trust Centre', sub: 'Identity level, sessions, security alerts and what is simulated.', render: renderPlatform },
+  rules: { label: 'Human Rules', title: 'Human Rules', sub: 'When the agent may warn you or draft an order.', render: renderRules },
 };
-const routes = user?.role === 'SUPPLIER'
-  ? { supplier: { label: 'Supplier Orders', title: 'Supplier Orders', sub: 'Agent-created orders from verified spaza owners.', render: renderSupplier } }
-  : ownerRoutes;
+const roleRoutes = {
+  SUPPLIER: {
+    supplier: { label: 'Supplier Orders', title: 'Supplier Orders', sub: 'Escrow-funded orders from verified spaza owners.', render: renderSupplier },
+    disputes: { label: 'Disputes', title: 'Disputes & Evidence', sub: 'Evidence packs for your orders.', render: renderDisputes },
+  },
+  ADMIN: {
+    disputes: { label: 'Dispute Reviews', title: 'Dispute Reviews', sub: 'Independent human decisions with written reasons.', render: renderDisputes },
+    audit: { label: 'Audit Log', title: 'Audit Log', sub: 'Verify the hash chain and inspect every recorded action.', render: renderAudit },
+  },
+};
+const routes = roleRoutes[user?.role] || ownerRoutes;
 
 if (!user) {
   renderLogin(document.getElementById('app'), api);
@@ -74,13 +84,13 @@ document.getElementById('app').innerHTML = `
       <section id="content"></section>
     </main>
   </div>
-  <nav class="mobile-nav">${navButtons('m', ['dashboard', 'studio', 'marketplace', 'wallet'])}
+  <nav class="mobile-nav">${navButtons('m', routes.dashboard ? ['dashboard', 'marketplace', 'orders', 'wallet'] : Object.keys(routes).slice(0, 4))}
     <button class="nav-btn m" id="more-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>More</span></button>
   </nav>
 `;
 
 document.getElementById('global-kasi-lang').addEventListener('change', ev => setLang(ev.target.value));
-window.addEventListener('kasi-language-change', () => { document.getElementById('global-kasi-lang').value = localStorage.getItem('kasi_lang'); showTab(location.hash.slice(1) || 'dashboard'); });
+window.addEventListener('kasi-language-change', () => { document.getElementById('global-kasi-lang').value = localStorage.getItem('kasi_lang'); showTab(location.hash.slice(1) || (routes.dashboard ? 'dashboard' : Object.keys(routes)[0])); });
 const sidebar = document.getElementById('sidebar');
 const overlay = document.getElementById('overlay');
 function setMenu(open) {
@@ -94,7 +104,7 @@ document.getElementById('more-btn').addEventListener('click', () => setMenu(true
 document.getElementById('menu-close').addEventListener('click', () => setMenu(false));
 overlay.addEventListener('click', () => setMenu(false));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
-document.getElementById('logout').addEventListener('click', () => { localStorage.removeItem('spaza_user'); window.location.assign(window.location.pathname + window.location.search); });
+document.getElementById('logout').addEventListener('click', async () => { try { await api.logout(); } catch { /* already signed out */ } session.clear(); window.location.assign(window.location.pathname); });
 const themeButton = document.getElementById('theme-toggle');
 function updateThemeButton() { themeButton.textContent = document.documentElement.dataset.theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'; }
 themeButton.addEventListener('click', () => { toggleTheme(); updateThemeButton(); });
@@ -105,8 +115,7 @@ let renderToken = 0;
 
 async function showTab(id) {
   if (!routes[id]) {
-    if (routes.dashboard) id = 'dashboard';
-    else return window.location.reload();
+    id = routes.dashboard ? 'dashboard' : Object.keys(routes)[0];
   }
   const r = routes[id];
   document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === id));
@@ -147,5 +156,5 @@ function tickClock() {
 
 checkHealth(); setInterval(checkHealth, 15000);
 tickClock(); setInterval(tickClock, 30000);
-showTab(location.hash.slice(1) || (user.role === 'SUPPLIER' ? 'supplier' : 'dashboard'));
+showTab(location.hash.slice(1) || (routes.dashboard ? 'dashboard' : Object.keys(routes)[0]));
 }

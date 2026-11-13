@@ -66,3 +66,36 @@ export const icons = {
   box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>',
   alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
 };
+
+const STATUS_TONE = {
+  COLLECTING: 'amber', FUNDED: 'violet', ACCEPTED: 'violet', IN_TRANSIT: 'violet', DELIVERED_PENDING_CONFIRMATION: 'amber',
+  COMPLETED: 'green', CANCELLED: 'rose', REFUNDED: 'rose', DISPUTED: 'rose',
+  PENDING: 'amber', BLOCKED: 'rose', DECLINED: 'rose', EXPIRED: 'rose', RELEASED: 'green',
+};
+export const statusChip = (s) => `<span class="chip ${STATUS_TONE[s] || ''}">${esc(String(s || '').replaceAll('_', ' ').toLowerCase())}</span>`;
+export const when = (iso) => iso ? new Date(iso).toLocaleString('en-ZA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+export const simulatedBadge = (text = 'Simulated') => `<span class="chip amber" title="This is a demo simulation, not a live integration">⚠ ${esc(text)}</span>`;
+
+/** Accessible one-time-code dialog. Resolves with the code, or null if cancelled. */
+export function askCode({ title, message, demoCode }) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal-backdrop';
+    wrap.innerHTML = `<div class="modal card" role="dialog" aria-modal="true" aria-labelledby="code-title">
+      <h3 id="code-title">${esc(title)}</h3><p class="sub">${esc(message)}</p>
+      ${demoCode ? `<div class="sim-sms"><b>Simulated SMS</b> · no SMS provider is connected, so your code is shown here: <span class="mono">${esc(demoCode)}</span></div>` : ''}
+      <form class="stack" style="margin-top:14px"><div class="field"><label for="otp-input">6-digit code</label>
+      <input id="otp-input" class="input mono" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></div>
+      <div class="row" style="gap:10px;justify-content:flex-end"><button type="button" class="btn btn-ghost" data-cancel>Cancel</button><button type="submit" class="btn btn-primary">Verify</button></div></form></div>`;
+    const close = (value) => { wrap.remove(); document.removeEventListener('keydown', onKey); resolve(value); };
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    wrap.querySelector('[data-cancel]').onclick = () => close(null);
+    wrap.querySelector('form').onsubmit = (e) => { e.preventDefault(); close(wrap.querySelector('input').value.trim()); };
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(wrap);
+    wrap.querySelector('input').focus();
+  });
+}
+icons.orders = icons.box;
+icons.supplier = icons.box;
+icons.audit = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
