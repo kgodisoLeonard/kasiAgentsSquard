@@ -28,6 +28,18 @@ export const errorBox = (msg) => `
 
 const EMOJI = { 'Meat & Poultry': '🥩', Bakery: '🍞', Dairy: '🥛', Staples: '🌽', Beverages: '🥤', Snacks: '🍿', Household: '🧼' };
 export const emojiFor = (cat) => EMOJI[cat] || '📦';
+export function applyTheme() {
+  const saved = localStorage.getItem('spaza_theme');
+  const theme = saved || (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = theme;
+  return theme;
+}
+export function toggleTheme() {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('spaza_theme', next);
+  document.documentElement.dataset.theme = next;
+  return next;
+}
 export const productImage = (name = '') => {
   const n = name.toLowerCase();
   if (n.includes('meat')) return 'img-meat';

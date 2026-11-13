@@ -1,6 +1,6 @@
 import './styles.css';
 import { api } from './api.js';
-import { icons, loader, errorBox } from './ui.js';
+import { icons, loader, errorBox, applyTheme, toggleTheme } from './ui.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderAgent } from './pages/agent.js';
 import { renderWallet } from './pages/wallet.js';
@@ -13,6 +13,7 @@ import { renderSupplier } from './pages/supplier.js';
 import { renderMarketplace } from './pages/marketplace.js';
 
 let user = null;
+applyTheme();
 try { user = JSON.parse(localStorage.getItem('spaza_user') || 'null'); }
 catch { localStorage.removeItem('spaza_user'); }
 const ownerRoutes = {
@@ -54,6 +55,7 @@ document.getElementById('app').innerHTML = `
       <div class="sidebar-foot">
         <div><span class="status-dot" id="api-dot"></span><span id="api-status">Checking API…</span></div>
         <div style="margin-top:6px;color:var(--dim)">XRPL Testnet · RLUSD</div>
+        <button class="btn btn-ghost btn-block" id="theme-toggle" style="margin-top:14px" type="button"></button>
         <button class="btn btn-ghost btn-block" id="logout" style="margin-top:14px">Log out</button>
       </div>
     </aside>
@@ -84,6 +86,10 @@ document.getElementById('menu-close').addEventListener('click', () => setMenu(fa
 overlay.addEventListener('click', () => setMenu(false));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
 document.getElementById('logout').addEventListener('click', () => { localStorage.removeItem('spaza_user'); window.location.assign(window.location.pathname + window.location.search); });
+const themeButton = document.getElementById('theme-toggle');
+function updateThemeButton() { themeButton.textContent = document.documentElement.dataset.theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'; }
+themeButton.addEventListener('click', () => { toggleTheme(); updateThemeButton(); });
+updateThemeButton();
 
 const content = document.getElementById('content');
 let renderToken = 0;
