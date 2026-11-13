@@ -1,8 +1,30 @@
 import { esc, money, icons, productThumb, toast } from '../ui.js';
 
+/**
+ * Dashboard. The agent's shortage scan runs once per visit (it may draft a group order); after that the page refreshes
+ * itself every 10 seconds from stock, wallet, orders and sales, and only redraws when something changed.
+ */
 export async function renderDashboard(root, api, alive) {
   const [inv, wallet, agent, orderData, salesData] = await Promise.all([api.inventory(), api.xrplStatus(), api.shortages(), api.groupOrders(), api.sales()]);
   if (!alive()) return;
+  let data = { inv, wallet, orderData, salesData }, last = JSON.stringify(data);
+  const refresh = async () => {
+    const [i, w, o, s] = await Promise.all([api.inventory(), api.xrplStatus(), api.groupOrders(), api.sales()]);
+    if (!alive()) return;
+    const next = { inv: i, wallet: w, orderData: o, salesData: s }, json = JSON.stringify(next);
+    if (json !== last) { last = json; data = next; paint(root, api, alive, agent, data, refresh); }
+    const chip = root.querySelector('#live-chip'); if (chip) { chip.textContent = `● Live · ${new Date().toLocaleTimeString()}`; chip.className = 'chip green'; }
+  };
+  paint(root, api, alive, agent, data, refresh);
+  const timer = setInterval(async () => {
+    if (!alive()) return clearInterval(timer);
+    if (document.hidden || root.querySelector('button:disabled')) return;   // tab not visible, or an action is in progress
+    try { await refresh(); }
+    catch { const chip = root.querySelector('#live-chip'); if (chip) { chip.textContent = '○ Reconnecting…'; chip.className = 'chip amber'; } }
+  }, 10000);
+}
+
+function paint(root, api, alive, agent, { inv, wallet, orderData, salesData }, refresh) {
   const items = inv.inventory, low = items.filter(p => p.qty <= p.lowStock);
   const stockValue = items.reduce((s, p) => s + p.qty * p.cost, 0);
   // The insight card shows your open group buy, or the agent's top shortage if no order is open yet.
@@ -21,7 +43,7 @@ export async function renderDashboard(root, api, alive) {
   const canConfirm = (o) => ['IN_TRANSIT', 'DELIVERED_PENDING_CONFIRMATION'].includes(o.status);
   const label = { FUNDED: 'Paid, waiting for the supplier to accept', ACCEPTED: 'Accepted, waiting for dispatch', IN_TRANSIT: 'On the way', DELIVERED_PENDING_CONFIRMATION: 'Supplier says delivered' };
   mine.sort((a, b) => canConfirm(b) - canConfirm(a));
-  root.firstElementChild.insertAdjacentHTML('afterend', `<div class="card deliveries" style="margin-top:20px"><div class="card-head"><div><h3>Deliveries</h3><p class="sub">Confirm only once the stock is in your shop. Confirming pays the supplier from escrow and adds the stock to your shelves.</p></div><span class="chip ${mine.some(canConfirm) ? 'amber' : 'green'}">${mine.filter(canConfirm).length} to confirm</span></div>
+  root.firstElementChild.insertAdjacentHTML('afterend', `<div class="card deliveries" style="margin-top:20px"><div class="card-head"><div><h3>Deliveries <span id="live-chip" class="chip green" style="margin-left:6px;font-size:11px">● Live · ${new Date().toLocaleTimeString()}</span></h3><p class="sub">Confirm only once the stock is in your shop. Confirming pays the supplier from escrow and adds the stock to your shelves.</p></div><span class="chip ${mine.some(canConfirm) ? 'amber' : 'green'}">${mine.filter(canConfirm).length} to confirm</span></div>
     ${mine.length ? mine.map((o) => `<div class="delivery-row">${productThumb(o.product, '')}<div class="info"><b>${esc(o.product)} · ${o.yourShare.quantity}</b><span>${esc(o.id)} · ${esc(o.supplierName)} · ${money(o.yourShare.total)} in escrow</span><span class="chip ${canConfirm(o) ? 'amber' : 'violet'}">${label[o.status]}</span></div>
       ${canConfirm(o) ? `<button class="btn btn-primary btn-sm" data-confirm-delivery="${esc(o.id)}">Confirm delivery</button>` : '<span class="sub">Confirm after dispatch</span>'}</div>`).join('') : '<div class="empty">No deliveries waiting. Restock orders show here once paid.</div>'}</div>`);
   root.querySelector('.deliveries').onclick = async (e) => {
@@ -30,7 +52,7 @@ export async function renderDashboard(root, api, alive) {
     const o = mine.find((x) => x.id === b.dataset.confirmDelivery);
     if (!confirm(`Confirm you received ${o.yourShare.quantity} × ${o.product} (${o.id})? This pays ${o.supplierName} ${money(o.yourShare.total)} from escrow.`)) return;
     b.disabled = true; b.textContent = 'Confirming…';
-    try { const r = await api.confirmDelivery(o.id); toast(r.message); if (alive()) renderDashboard(root, api, alive); }
+    try { const r = await api.confirmDelivery(o.id); toast(r.message); if (alive()) await refresh(); }
     catch (err) { toast(err.message, 'error'); b.disabled = false; b.textContent = 'Confirm delivery'; }
   };
 }
