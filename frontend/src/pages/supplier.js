@@ -1,7 +1,8 @@
 import { esc, money, toast, statusChip, when, simulatedBadge, updatesList } from '../ui.js';
+import { supplierDashboardHtml, wireTooltips } from './supplier-dashboard.js';
 
 export async function renderSupplier(root, api, alive) {
-  const [orderData, directoryData, priceData, updateData] = await Promise.all([api.groupOrders(), api.directory(), api.myPrices(), api.updates()]);
+  const [orderData, directoryData, priceData, updateData, dashData] = await Promise.all([api.groupOrders(), api.directory(), api.myPrices(), api.updates(), api.supplierDashboard()]);
   if (!alive()) return;
   let orders = orderData.orders;
   let prices = priceData.prices;
@@ -11,6 +12,7 @@ export async function renderSupplier(root, api, alive) {
     <div class="hero"><span class="chip green">Verified supplier workspace</span> ${simulatedBadge('Ledger simulated')}
       <h3>Orders arrive already paid into escrow</h3>
       <p>You only see an order once the buyers' shares are in escrow and the minimum is met. Payment is released directly to your verified payout address when every paying buyer confirms delivery.</p></div>
+    <div id="supplier-dash" class="viz sd-root" style="margin-top:20px">${supplierDashboardHtml(dashData)}</div>
     <div class="card" style="margin-top:20px"><div class="card-head"><div><h3>Spaza owners in the network</h3><p class="sub">Registered shops looking for trusted supply partners.</p></div><span class="chip violet">${spazas.length} spazas</span></div>
       <div class="directory-grid">${spazas.map((s) => `<div class="directory-card"><div class="row"><b>${esc(s.businessName)}</b><span class="chip ${s.verified ? 'green' : 'amber'}">${s.verified ? 'Verified' : 'New owner'}</span></div><p class="sub">${esc(s.name)} · South Africa</p></div>`).join('') || '<div class="empty">No spaza owners are registered yet.</div>'}</div></div>
     <div class="card" style="margin-top:20px"><div class="card-head"><div><h3>My price list</h3><p class="sub">Wholesale price and stock per unit. The agent orders at these prices (never above a shop owner's own limit); orders bigger than your stock go to another supplier.</p></div><span class="chip green" id="price-count"></span></div>
@@ -57,13 +59,21 @@ export async function renderSupplier(root, api, alive) {
   };
   draw();
 
-  let lastOrders = JSON.stringify(orders), lastUpdates = JSON.stringify(updateData.updates);
+  const dashEl = root.querySelector('#supplier-dash');
+  wireTooltips(dashEl);
+  let lastOrders = JSON.stringify(orders), lastUpdates = JSON.stringify(updateData.updates), lastDash = JSON.stringify(dashData);
   const timer = setInterval(async () => {
     if (!alive()) return clearInterval(timer);
     if (root.querySelector('#orders button:disabled')) return;
     try {
-      const [o, u] = await Promise.all([api.groupOrders(), api.updates()]);
+      const [o, u, d] = await Promise.all([api.groupOrders(), api.updates(), api.supplierDashboard()]);
       if (!alive()) return clearInterval(timer);
+      if (JSON.stringify(d) !== lastDash) {
+        lastDash = JSON.stringify(d);
+        const open = dashEl.querySelector('details')?.open;
+        dashEl.innerHTML = supplierDashboardHtml(d); wireTooltips(dashEl);
+        if (open) dashEl.querySelector('details').open = true;
+      }
       if (JSON.stringify(o.orders) !== lastOrders) { orders = o.orders; lastOrders = JSON.stringify(orders); draw(); }
       if (JSON.stringify(u.updates) !== lastUpdates) { lastUpdates = JSON.stringify(u.updates); root.querySelector('#updates').innerHTML = updatesList(u.updates); }
     } catch { /* try again next tick */ }

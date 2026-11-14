@@ -155,6 +155,7 @@ export const api = {
   directory: () => request('/platform/directory'),
   recommendedSuppliers: () => request('/platform/suppliers/recommended'),
   myPrices: () => request('/supplier/prices'),
+  supplierDashboard: () => request('/supplier/dashboard'),
   updates: () => request('/platform/updates'),
   setMyPrice: (product, unitPrice, stock) => put('/supplier/prices', { product, unitPrice, stock }),
   deleteMyPrice: (product) => request(`/supplier/prices?product=${encodeURIComponent(product)}`, { method: 'DELETE' }),

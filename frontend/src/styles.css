@@ -284,9 +284,6 @@ input, select { font: inherit; }
 .link-btn { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--primary-2); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .link-btn:hover { color: var(--primary); }
 .auth-error.auth-notice { color: var(--text); background: var(--primary-soft); border-radius: 10px; padding: 8px 12px; }
-.auth-demo { margin-top: clamp(10px, 2vh, 18px); padding-top: clamp(8px, 1.6vh, 14px); border-top: 1px solid var(--border); line-height: 1.6; font-size: 12px; }
-.auth-demo summary { cursor: pointer; font-weight: 600; }
-.auth-demo p { margin-top: 6px; }
 
 @media (max-width: 860px) {
   .auth-layout { grid-template-columns: 1fr; grid-template-rows: clamp(0px, 22vh, 190px) minmax(0, 1fr); height: 100%; }
@@ -558,3 +555,46 @@ pre.result { white-space: pre-wrap; word-break: break-word; font-size: 12px; max
 
 .price-row .mini { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
 .chip.rose { color: var(--rose); background: hsla(0 70% 60% / .1); }
+
+/* ---- Supplier dashboard (charts). Status colours are the fixed status palette; "to deliver" is categorical blue. */
+.viz { --viz-good: #0ca30c; --viz-warning: #fab219; --viz-blue: #2a78d6; --viz-critical: #d03b3b;
+  --viz-grid: #e1e0d9; --viz-axis: #c3c2b7; --viz-muted: #898781; --viz-surface: var(--surface-solid); }
+[data-theme="dark"] .viz { --viz-blue: #3987e5; --viz-grid: #2c3a32; --viz-axis: #3a4a40; }
+.sd-root { position: relative; }
+.sd-kpis { display: grid; grid-template-columns: 1.3fr 1fr 1fr 1fr; gap: 16px; }
+.sd-kpis .stat .value { font-size: 22px; }
+.sd-kpis .sd-hero .value { font-size: 40px; letter-spacing: -.02em; }
+.sd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.sd-grid > .sd-card:nth-child(2) { grid-column: span 1; }
+.sd-segbar { display: flex; gap: 2px; height: 28px; margin: 6px 0 10px; }
+.sd-seg { border-radius: 4px; display: flex; align-items: center; padding: 0 8px; min-width: 4px; font-size: 12px; font-weight: 600; color: #fff; cursor: default; }
+.sd-seg.sd-warning { color: #0b0b0b; }
+.sd-seg:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.sd-good { background: var(--viz-good); } .sd-warning { background: var(--viz-warning); } .sd-blue { background: var(--viz-blue); } .sd-critical { background: var(--viz-critical); }
+.sd-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.sd-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sd-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.sd-table { font-size: 12px; } .sd-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.sd-chart { position: relative; }
+.sd-chart svg { width: 100%; height: auto; display: block; }
+line.sd-gridline { stroke: var(--viz-grid); stroke-width: 1; }
+.sd-baseline { stroke: var(--viz-axis); stroke-width: 1; }
+.sd-bar { fill: var(--viz-blue); }
+.sd-hit { fill: transparent; }
+.sd-col:hover .sd-bar { opacity: .85; }
+.sd-axis-label { fill: var(--viz-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sd-value { fill: var(--text); font-size: 11px; font-weight: 600; }
+.sd-tableview { margin-top: 8px; font-size: 12px; } .sd-tableview summary { cursor: pointer; color: var(--muted); }
+.sd-ranked { display: grid; gap: 8px; }
+.sd-rank-row { display: grid; grid-template-columns: minmax(110px, 38%) 1fr auto; align-items: center; gap: 10px; font-size: 13px; }
+.sd-rank-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-rank-track { height: 16px; }
+.sd-rank-bar { display: block; height: 16px; border-radius: 0 4px 4px 0; background: var(--viz-blue); min-width: 2px; }
+.sd-rank-val { font-variant-numeric: tabular-nums; color: var(--text); font-weight: 600; }
+.sd-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--surface-solid); color: var(--text); border: 1px solid var(--border-strong);
+  border-radius: 8px; padding: 6px 10px; font-size: 12px; box-shadow: var(--shadow); white-space: nowrap; }
+@media (max-width: 1000px) { .sd-kpis { grid-template-columns: 1fr 1fr; } .sd-grid { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .sd-kpis { grid-template-columns: 1fr; } }
+.sd-kpis .stat .trend { color: var(--muted); }
+.sd-grid > .sd-card:nth-child(3) { grid-column: 1 / -1; }
+@media (max-width: 1000px) { .sd-grid > .sd-card:nth-child(3) { grid-column: auto; } }
